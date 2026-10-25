@@ -15,6 +15,10 @@ const props = defineProps<{
   estimateS: number;
   from: number;
   to: number | null;
+  /** The upload continues one this browser started earlier for the same file. */
+  continuing?: boolean;
+  /** This tab created the job; otherwise cancelling only leaves the page and deletes nothing. */
+  owned?: boolean;
 }>();
 const emit = defineEmits<{ cancel: []; resume: [] }>();
 const { t } = useI18n();
@@ -51,6 +55,9 @@ const measurable = computed(() => props.mode !== 'queued');
 
 <template>
   <div class="progress-panel">
+    <p v-if="continuing && (mode === 'uploading' || mode === 'interrupted')" class="note">
+      {{ t('convert.progress.continuing') }}
+    </p>
     <p class="text">{{ text }}</p>
     <div
       class="bar"
@@ -66,7 +73,9 @@ const measurable = computed(() => props.mode !== 'queued');
     </div>
     <div class="actions">
       <BaseButton v-if="mode === 'interrupted'" @click="emit('resume')">{{ t('convert.resume') }}</BaseButton>
-      <BaseButton variant="ghost" @click="emit('cancel')">{{ t('convert.cancel') }}</BaseButton>
+      <BaseButton variant="ghost" @click="emit('cancel')">
+        {{ owned === false ? t('convert.leave') : t('convert.cancel') }}
+      </BaseButton>
     </div>
   </div>
 </template>
@@ -79,6 +88,12 @@ const measurable = computed(() => props.mode !== 'queued');
 
 .text {
   margin: 0;
+}
+
+.note {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
 }
 
 .bar {

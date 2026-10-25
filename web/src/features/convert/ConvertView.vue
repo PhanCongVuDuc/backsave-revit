@@ -9,7 +9,6 @@ import FailurePanel from './components/FailurePanel.vue';
 import FileSummary from './components/FileSummary.vue';
 import ProgressPanel from './components/ProgressPanel.vue';
 import ResultPanel from './components/ResultPanel.vue';
-import ResumeNotice from './components/ResumeNotice.vue';
 import { formatBytes } from './format';
 import { useConvertStore } from './stores/convertStore';
 
@@ -118,15 +117,7 @@ onMounted(() => {
     <h1>{{ t('convert.title') }}</h1>
     <p class="lead">{{ t('convert.lead') }}</p>
     <div ref="card" class="card" tabindex="-1">
-      <template v-if="store.phase === 'pick'">
-        <ResumeNotice
-          v-if="store.resumeCandidate"
-          :name="store.resumeCandidate.name"
-          :mismatch="store.resumeMismatch"
-          @start-over="store.startOver"
-        />
-        <AddFile @file="store.chooseFile" />
-      </template>
+      <AddFile v-if="store.phase === 'pick'" @file="store.chooseFile" />
       <FileSummary
         v-else-if="store.phase === 'ready' && store.file"
         v-model="targetModel"
@@ -145,6 +136,8 @@ onMounted(() => {
         :estimate-s="store.estimateS"
         :from="store.info?.year ?? 0"
         :to="store.target"
+        :continuing="store.continuing"
+        :owned="store.ownsJob"
         @cancel="store.cancel"
         @resume="store.retryUpload"
       />

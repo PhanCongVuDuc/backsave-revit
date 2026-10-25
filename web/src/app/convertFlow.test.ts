@@ -17,7 +17,8 @@ import en from '@/features/convert/locales/en.json';
 import viConvert from '@/features/convert/locales/vi.json';
 import { basicFileInfo, fileOf, makeOle } from '@/shared/revit-file/makeOle.testutil';
 
-import { JOB_STORAGE_KEY, POLL_INTERVAL_MS } from '@/features/convert/stores/convertStore';
+import { POLL_INTERVAL_MS } from '@/features/convert/stores/convertStore';
+import { UPLOADS_STORAGE_KEY } from '@/features/convert/stores/uploadRegistry';
 
 vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api')>();
@@ -166,7 +167,7 @@ describe('conversion card', () => {
     await settle();
     expect(screen.getByRole('button', { name: 'Add a Revit file' })).toBeInTheDocument();
     expect(router.currentRoute.value.name).toBe('convert');
-    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(UPLOADS_STORAGE_KEY)).toBeNull();
   });
 
   it('shows the upload progress as a progressbar with a percentage', async () => {
@@ -401,19 +402,45 @@ describe('shell', () => {
 });
 
 describe('reopening', () => {
-  it('asks for the same file to continue an unfinished upload', async () => {
-    mocked.getJob.mockResolvedValueOnce(status({ state: 'waiting_upload', name: 'tower.rvt', size: 1 }));
+  it('a link to a job still uploading elsewhere shows the normal card', async () => {
+    mocked.getJob.mockResolvedValueOnce(status({ state: 'waiting_upload' }));
+    const { router } = await open(`/job/${JOB}`);
+    expect(screen.getByRole('button', { name: 'Add a Revit file' })).toBeInTheDocument();
+    expect(router.currentRoute.value.name).toBe('convert');
+    expect(mocked.deleteJob).not.toHaveBeenCalled();
+  });
+
+  it('continues an earlier upload of the same file and says so', async () => {
+    const file = new File([revitFile()], 'tower.rvt', { lastModified: 1_790_000_000_000 });
+    localStorage.setItem(
+      UPLOADS_STORAGE_KEY,
+      JSON.stringify([
+        {
+          name: file.name,
+          size: file.size,
+          lastModified: file.lastModified,
+          jobId: JOB,
+          uploadUrl: `/api/uploads/${JOB}`,
+          createdAt: Date.now(),
+        },
+      ]),
+    );
+    mocked.getJob.mockResolvedValueOnce(status({ state: 'waiting_upload' }));
+    mocked.uploadFile.mockReturnValue(new Promise(() => undefined));
+    await open();
+    await user().upload(screen.getByLabelText('Revit file'), file);
+    await settle();
+    expect(screen.getByText(en.convert.progress.continuing)).toBeInTheDocument();
+    expect(mocked.createJob).not.toHaveBeenCalled();
+  });
+
+  it('a job followed from a link offers to leave, not to delete', async () => {
+    mocked.getJob.mockResolvedValue(status({ state: 'running', elapsedS: 5 }));
     await open(`/job/${JOB}`);
-    expect(
-      screen.getByText('An upload of tower.rvt did not finish. Choose the same file to continue.'),
-    ).toBeInTheDocument();
-    await user().upload(screen.getByLabelText('Revit file'), revitFile(2026, 'other.rvt'));
+    await user().click(screen.getByRole('button', { name: en.convert.leave }));
     await settle();
-    expect(screen.getByText('This is not the same file. Choose tower.rvt again, or start over.')).toBeInTheDocument();
-    await user().click(screen.getByRole('button', { name: 'Start over' }));
-    await settle();
-    expect(mocked.deleteJob).toHaveBeenCalledWith(JOB);
-    expect(screen.queryByText(/did not finish/)).not.toBeInTheDocument();
+    expect(mocked.deleteJob).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Add a Revit file' })).toBeInTheDocument();
   });
 
   it('shows the versions of a reopened running job', async () => {

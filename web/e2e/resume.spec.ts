@@ -60,12 +60,47 @@ test('reload_mid_upload_then_continue', async ({ page }) => {
 
   await page.unroute('**/api/uploads/**');
   await page.reload();
-  await expect(
-    page.getByText('An upload of model_2026.rvt did not finish. Choose the same file to continue.'),
-  ).toBeVisible();
-  expect(page.url()).toBe(address);
+  // The reopened page shows the normal card; nothing is said about the unfinished upload until its file is chosen.
+  await expect(page.getByRole('button', { name: 'Add a Revit file' })).toBeVisible();
+  await expect(page.getByText(/did not finish/)).toBeHidden();
 
   await page.getByLabel('Revit file').setInputFiles(path);
   await expect(page.getByRole('link', { name: /^Download model_2026_R2025\.rvt/ })).toBeVisible();
+  // The same job was continued, not a new one created.
   expect(page.url()).toBe(address);
+});
+
+test('second_tab_does_not_touch_first_tab_upload', async ({ page, context }) => {
+  // Tab A's upload is held mid-request until the test lets it through.
+  let releaseUpload: () => void = () => undefined;
+  const uploadHeld = new Promise<void>((resolve) => {
+    releaseUpload = resolve;
+  });
+  let patchSeen = false;
+  await page.route('**/api/uploads/**', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      patchSeen = true;
+      await uploadHeld;
+    }
+    await route.continue();
+  });
+
+  const path = revitFile('model_2026.rvt', 2026);
+  await page.goto('/');
+  await page.getByLabel('Revit file').setInputFiles(path);
+  await page.getByRole('button', { name: 'Downgrade' }).click();
+  await expect.poll(() => patchSeen).toBe(true);
+
+  // Tab B opens the start page: the normal card, no word about tab A's upload.
+  const second = await context.newPage();
+  await second.goto('/');
+  await expect(second.getByRole('button', { name: 'Add a Revit file' })).toBeVisible();
+  await expect(second.getByText(/did not finish|another tab/)).toBeHidden();
+
+  // Choosing the same file in tab B neither takes over nor deletes tab A's job.
+  await second.getByLabel('Revit file').setInputFiles(path);
+  await expect(second.getByRole('alert')).toHaveText('This file is being uploaded in another tab.');
+
+  releaseUpload();
+  await expect(page.getByRole('link', { name: /^Download model_2026_R2025\.rvt/ })).toBeVisible();
 });

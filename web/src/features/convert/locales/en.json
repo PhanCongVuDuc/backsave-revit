@@ -34,6 +34,7 @@
     "chooseAnother": "Choose another file",
     "convertAnother": "Convert another file",
     "cancel": "Cancel and delete file",
+    "leave": "Back to the start",
     "resume": "Resume",
     "progress": {
       "label": "Upload progress",
@@ -42,7 +43,8 @@
       "waiting": "Waiting — you are next | Waiting — 1 file ahead | Waiting — {n} files ahead",
       "waitingUnknown": "Waiting in the queue",
       "converting": "Converting {from} → {to} — {elapsed}",
-      "convertingEstimate": "Converting {from} → {to} — {elapsed} / about {estimate}"
+      "convertingEstimate": "Converting {from} → {to} — {elapsed} / about {estimate}",
+      "continuing": "Continuing your earlier upload"
     },
     "result": {
       "title": "Converted to Revit {year}",
@@ -96,7 +98,6 @@
       "server_restarted": "The server was restarted and lost this file. Please choose it again.",
       "expired": "This conversion has expired and its file was deleted.",
       "cancelled": "The conversion was cancelled.",
-      "upload_interrupted": "The upload did not finish, so the conversion did not start.",
       "hourly_limit": "Too many conversions from your network. Try again in {minutes} min.",
       "active_job": "You already have a conversion in progress. Wait for it to finish.",
       "uploads_in_progress": "You already have uploads in progress. Wait for them to finish.",
@@ -107,12 +108,8 @@
       "upload_failed": "The upload was interrupted. Check your connection, then resume.",
       "storage_error": "The server could not store the file. Please try again later.",
       "upload_closed": "This upload has already finished or was stopped.",
-      "server_full": "The server is busy with other files. Please try again in {minutes} min."
-    },
-    "reopen": {
-      "prompt": "An upload of {name} did not finish. Choose the same file to continue.",
-      "mismatch": "This is not the same file. Choose {name} again, or start over.",
-      "startOver": "Start over"
+      "server_full": "The server is busy with other files. Please try again in {minutes} min.",
+      "upload_in_other_tab": "This file is being uploaded in another tab."
     }
   }
 }

@@ -5,7 +5,20 @@ import * as api from '@/api';
 import { ApiError, type JobStatus, type ServerInfo } from '@/api';
 import { basicFileInfo, fileOf, makeOle } from '@/shared/revit-file/makeOle.testutil';
 
-import { JOB_STORAGE_KEY, POLL_INTERVAL_MS, useConvertStore } from './convertStore';
+import { POLL_INTERVAL_MS, useConvertStore } from './convertStore';
+import { UPLOAD_ENTRY_MAX_AGE_MS, UPLOADS_STORAGE_KEY } from './uploadRegistry';
+
+const lock = vi.hoisted(() => ({ heldByOthers: new Set<string>(), held: [] as string[], released: [] as string[] }));
+
+vi.mock('@/shared/locks/uploadLock', () => ({
+  isUploadLockHeld: (jobId: string) => Promise.resolve(lock.heldByOthers.has(jobId)),
+  holdUploadLock: (jobId: string) => {
+    lock.held.push(jobId);
+    return () => {
+      lock.released.push(jobId);
+    };
+  },
+}));
 
 vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api')>();
@@ -48,9 +61,33 @@ function status(overrides: Partial<JobStatus>): JobStatus {
   };
 }
 
-function revitFile(year: number, name = 'tower.rvt'): File {
-  return fileOf(makeOle([['BasicFileInfo', basicFileInfo(year)]]), name);
+const LAST_MODIFIED = 1_790_000_000_000;
+
+function revitFile(year: number, name = 'tower.rvt', lastModified = LAST_MODIFIED): File {
+  return new File([fileOf(makeOle([['BasicFileInfo', basicFileInfo(year)]]), name)], name, { lastModified });
 }
+
+/** Job ids in this browser's list of unfinished uploads. */
+function storedJobs(): string[] {
+  const raw = localStorage.getItem(UPLOADS_STORAGE_KEY);
+  return raw ? (JSON.parse(raw) as { jobId: string }[]).map((entry) => entry.jobId) : [];
+}
+
+/** Puts an unfinished upload of `file` for `jobId` in the list, as an earlier visit would have. */
+function storeUpload(file: File, jobId: string, createdAt = Date.now()) {
+  const entries = JSON.parse(localStorage.getItem(UPLOADS_STORAGE_KEY) ?? '[]') as unknown[];
+  entries.push({
+    name: file.name,
+    size: file.size,
+    lastModified: file.lastModified,
+    jobId,
+    uploadUrl: `/api/uploads/${jobId}`,
+    createdAt,
+  });
+  localStorage.setItem(UPLOADS_STORAGE_KEY, JSON.stringify(entries));
+}
+
+const OTHER = 'ffffffffffffffffffffffffffffffff';
 
 /** Lets pending promise callbacks run; timers stay frozen. */
 async function settle() {
@@ -76,6 +113,9 @@ const ALL_PAIRS: [number, number][] = [
 beforeEach(() => {
   setActivePinia(createPinia());
   localStorage.clear();
+  lock.heldByOthers.clear();
+  lock.held = [];
+  lock.released = [];
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   mocked.createJob.mockResolvedValue({ jobId: JOB, uploadUrl: `/api/uploads/${JOB}` });
   mocked.uploadFile.mockResolvedValue(undefined);
@@ -179,7 +219,8 @@ describe('submitting', () => {
     expect(store.phase).toBe('uploading');
     expect(store.progress).toBe(0.5);
     expect(store.jobId).toBe(JOB);
-    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBe(JOB);
+    expect(storedJobs()).toEqual([JOB]);
+    expect(lock.held).toEqual([JOB]);
     expect(mocked.uploadFile).toHaveBeenCalledWith(store.file, `/api/uploads/${JOB}`, expect.anything());
 
     finishUpload();
@@ -187,6 +228,9 @@ describe('submitting', () => {
     await settle();
     expect(store.phase).toBe('queued');
     expect(store.position).toBe(1);
+    // The upload is complete: nothing left to continue, and other tabs no longer see it in progress.
+    expect(storedJobs()).toEqual([]);
+    expect(lock.released).toEqual([JOB]);
 
     await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
     await settle();
@@ -201,7 +245,6 @@ describe('submitting', () => {
 
     await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 5);
     expect(mocked.getJob).toHaveBeenCalledTimes(3);
-    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBe(JOB);
   });
 
   it('shows the server refusal with its retry time', async () => {
@@ -210,7 +253,7 @@ describe('submitting', () => {
     await store.submit();
     expect(store.phase).toBe('error');
     expect(store.error).toEqual({ code: 'hourly_limit', message: 'Too many.', retryAfterS: 1800 });
-    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBeNull();
+    expect(storedJobs()).toEqual([]);
   });
 
   it('keeps the job after the upload gives up, so it can be resumed later', async () => {
@@ -221,11 +264,11 @@ describe('submitting', () => {
     expect(store.phase).toBe('error');
     expect(store.error?.code).toBe('upload_failed');
     expect(store.jobId).toBe(JOB);
-    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBe(JOB);
+    expect(storedJobs()).toEqual([JOB]);
 
     await store.chooseFile(revitFile(2026, 'other.rvt'));
     expect(mocked.deleteJob).toHaveBeenCalledWith(JOB);
-    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBeNull();
+    expect(storedJobs()).toEqual([]);
     expect(store.phase).toBe('ready');
   });
 
@@ -296,17 +339,17 @@ describe('job outcomes', () => {
     await settle();
     expect(store.phase).toBe('error');
     expect(store.error?.code).toBe('server_restarted');
-    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBeNull();
+    expect(storedJobs()).toEqual([]);
   });
 
   it('shows expired on 410 and forgets the job', async () => {
-    localStorage.setItem(JOB_STORAGE_KEY, JOB);
+    storeUpload(revitFile(2026), JOB);
     mocked.getJob.mockRejectedValue(new ApiError(410, 'expired', 'gone'));
     const store = useConvertStore();
-    await expect(store.resume()).resolves.toBe(true);
+    await expect(store.resume(JOB)).resolves.toBe(true);
     expect(store.phase).toBe('error');
     expect(store.error?.code).toBe('expired');
-    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBeNull();
+    expect(storedJobs()).toEqual([]);
   });
 
   it('keeps polling through a network blip', async () => {
@@ -382,7 +425,6 @@ describe('retained jobs', () => {
     expect(store.phase).toBe('queued');
     expect(store.error).toBeNull();
     expect(store.jobId).toBe(JOB);
-    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBe(JOB);
   });
 
   it('ignores retryUpload unless the upload gave up', async () => {
@@ -401,7 +443,6 @@ describe('retained jobs', () => {
     await store.chooseFile(revitFile(2026));
     expect(store.phase).toBe('ready');
     expect(mocked.deleteJob).not.toHaveBeenCalled();
-    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBe(JOB);
   });
 });
 
@@ -423,73 +464,137 @@ describe('resume, cancel and delete', () => {
     expect(store.elapsedS).toBe(30);
     expect(store.expiresAt).toBe('2026-10-25T14:00:00Z');
     expect(store.dropped).toEqual([]);
-    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBe(JOB);
   });
 
-  it('resumes the remembered job when no id is given, and ignores a malformed id', async () => {
+  it('opening the start page follows nothing, and a malformed id is ignored', async () => {
+    storeUpload(revitFile(2026), JOB);
     const store = useConvertStore();
     await expect(store.resume()).resolves.toBe(false);
     await expect(store.resume('not-a-job')).resolves.toBe(false);
     expect(mocked.getJob).not.toHaveBeenCalled();
-    localStorage.setItem(JOB_STORAGE_KEY, JOB);
-    mocked.getJob.mockResolvedValue(status({ state: 'running' }));
-    await store.resume();
-    expect(store.phase).toBe('running');
-    expect(mocked.getJob).toHaveBeenCalledWith(JOB);
+    expect(store.phase).toBe('pick');
   });
 
-  it('resume_waiting_upload_does_not_delete_job', async () => {
-    mocked.getJob.mockResolvedValue(status({ state: 'waiting_upload', name: 'tower.rvt', size: 4096 }));
+  it('a link to a job still waiting for its upload shows the normal card and touches nothing', async () => {
+    storeUpload(revitFile(2026), JOB);
+    mocked.getJob.mockResolvedValue(status({ state: 'waiting_upload' }));
     const store = useConvertStore();
     await store.resume(JOB);
     expect(store.phase).toBe('pick');
-    expect(store.resumeCandidate).toEqual({
-      jobId: JOB,
-      uploadUrl: `/api/uploads/${JOB}`,
-      name: 'tower.rvt',
-      size: 4096,
-    });
+    expect(store.jobId).toBeNull();
+    await store.cancel();
     expect(mocked.deleteJob).not.toHaveBeenCalled();
-    // Another tab may own the upload: the id stays, in the store and in storage.
-    expect(store.jobId).toBe(JOB);
-    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBe(JOB);
+    expect(storedJobs()).toEqual([JOB]);
   });
 
-  it('continues an unfinished upload when the same file is chosen again', async () => {
+  it('continues the earlier upload when the same file is chosen again', async () => {
     mocked.getInfo.mockResolvedValue(serverInfo(ALL_PAIRS));
-    const same = revitFile(2026);
-    mocked.getJob.mockResolvedValueOnce(
-      status({ state: 'waiting_upload', name: same.name, size: same.size, year: 2026, target: 2024 }),
+    storeUpload(revitFile(2026), JOB);
+    mocked.getJob
+      .mockResolvedValueOnce(status({ state: 'waiting_upload', year: 2026, target: 2024 }))
+      .mockResolvedValue(status({ state: 'queued', position: 0 }));
+    let finish: () => void = () => undefined;
+    mocked.uploadFile.mockReturnValue(
+      new Promise((resolve) => {
+        finish = () => {
+          resolve();
+        };
+      }),
     );
     const store = useConvertStore();
-    await store.resume(JOB);
-    mocked.getJob.mockResolvedValue(status({ state: 'queued', position: 0 }));
-    await store.chooseFile(same);
-    await settle();
-    expect(mocked.createJob).not.toHaveBeenCalled();
-    expect(mocked.uploadFile).toHaveBeenCalledWith(same, `/api/uploads/${JOB}`, expect.anything());
-    expect(store.resumeCandidate).toBeNull();
+    const same = revitFile(2026);
+    const chosen = store.chooseFile(same);
+    // Reading the file takes a few turns of the event loop.
+    for (let turn = 0; turn < 50 && store.phase !== 'uploading'; turn += 1) {
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(store.phase).toBe('uploading');
+    expect(store.continuing).toBe(true);
     expect(store.jobId).toBe(JOB);
     expect(store.target).toBe(2024);
+    expect(mocked.createJob).not.toHaveBeenCalled();
+    expect(mocked.uploadFile).toHaveBeenCalledWith(same, `/api/uploads/${JOB}`, expect.anything());
+    expect(lock.held).toEqual([JOB]);
+    finish();
+    await chosen;
+    await settle();
     expect(store.phase).toBe('queued');
+    expect(storedJobs()).toEqual([]);
   });
 
-  it('asks again when a different file is chosen, and starting over deletes the old job', async () => {
+  it('starts a new job for a different file, or the same name with another date', async () => {
     mocked.getInfo.mockResolvedValue(serverInfo(ALL_PAIRS));
-    mocked.getJob.mockResolvedValue(status({ state: 'waiting_upload', name: 'tower.rvt', size: 1 }));
+    storeUpload(revitFile(2026), JOB);
     const store = useConvertStore();
-    await store.resume(JOB);
     await store.chooseFile(revitFile(2026, 'other.rvt'));
-    expect(store.phase).toBe('pick');
-    expect(store.resumeMismatch).toBe(true);
-    expect(mocked.uploadFile).not.toHaveBeenCalled();
+    expect(store.phase).toBe('ready');
+    await store.chooseFile(revitFile(2026, 'tower.rvt', LAST_MODIFIED + 1));
+    expect(store.phase).toBe('ready');
+    expect(mocked.getJob).not.toHaveBeenCalled();
+    expect(storedJobs()).toEqual([JOB]);
+  });
 
-    await store.startOver();
-    expect(mocked.deleteJob).toHaveBeenCalledWith(JOB);
-    expect(store.resumeCandidate).toBeNull();
-    expect(store.resumeMismatch).toBe(false);
+  it('says so when another tab is uploading the same file, and deletes nothing', async () => {
+    mocked.getInfo.mockResolvedValue(serverInfo(ALL_PAIRS));
+    storeUpload(revitFile(2026), JOB);
+    lock.heldByOthers.add(JOB);
+    mocked.getJob.mockResolvedValue(status({ state: 'waiting_upload' }));
+    const store = useConvertStore();
+    await store.chooseFile(revitFile(2026));
+    expect(store.phase).toBe('error');
+    expect(store.error?.code).toBe('upload_in_other_tab');
+    expect(mocked.uploadFile).not.toHaveBeenCalled();
     expect(store.jobId).toBeNull();
-    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBeNull();
+    await store.cancel();
+    expect(mocked.deleteJob).not.toHaveBeenCalled();
+    expect(storedJobs()).toEqual([JOB]);
+  });
+
+  it('drops the entry and starts afresh when the earlier job is no longer waiting or is gone', async () => {
+    mocked.getInfo.mockResolvedValue(serverInfo(ALL_PAIRS));
+    storeUpload(revitFile(2026), JOB);
+    mocked.getJob.mockResolvedValueOnce(status({ state: 'queued' }));
+    const store = useConvertStore();
+    await store.chooseFile(revitFile(2026));
+    expect(store.phase).toBe('ready');
+    expect(storedJobs()).toEqual([]);
+
+    storeUpload(revitFile(2026), OTHER);
+    mocked.getJob.mockRejectedValueOnce(new ApiError(404, 'not_found', 'gone'));
+    await store.chooseFile(revitFile(2026));
+    expect(store.phase).toBe('ready');
+    expect(storedJobs()).toEqual([]);
+    expect(mocked.deleteJob).not.toHaveBeenCalled();
+  });
+
+  it('keeps the entry when the server cannot be asked', async () => {
+    mocked.getInfo.mockResolvedValue(serverInfo(ALL_PAIRS));
+    storeUpload(revitFile(2026), JOB);
+    mocked.getJob.mockRejectedValueOnce(new ApiError(0, 'network', 'offline'));
+    const store = useConvertStore();
+    await store.chooseFile(revitFile(2026));
+    expect(store.phase).toBe('ready');
+    expect(storedJobs()).toEqual([JOB]);
+  });
+
+  it('prunes entries older than 6 hours', async () => {
+    mocked.getInfo.mockResolvedValue(serverInfo(ALL_PAIRS));
+    storeUpload(revitFile(2026), JOB, Date.now() - UPLOAD_ENTRY_MAX_AGE_MS - 1);
+    storeUpload(revitFile(2026, 'b.rvt'), OTHER);
+    const store = useConvertStore();
+    await store.chooseFile(revitFile(2026));
+    expect(mocked.getJob).not.toHaveBeenCalled();
+    expect(store.phase).toBe('ready');
+    expect(storedJobs()).toEqual([OTHER]);
+  });
+
+  it('never deletes a job it only follows from a link', async () => {
+    mocked.getJob.mockResolvedValue(status({ state: 'running' }));
+    const store = useConvertStore();
+    await store.resume(OTHER);
+    expect(store.ownsJob).toBe(false);
+    await store.cancel();
+    expect(mocked.deleteJob).not.toHaveBeenCalled();
     expect(store.phase).toBe('pick');
   });
 
@@ -541,7 +646,7 @@ describe('resume, cancel and delete', () => {
     expect(store.file).toBeNull();
     expect(store.error).toBeNull();
     expect(store.jobId).toBeNull();
-    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBeNull();
+    expect(storedJobs()).toEqual([]);
   });
 
   it('cancel after the upload gave up deletes the waiting job', async () => {
@@ -551,7 +656,7 @@ describe('resume, cancel and delete', () => {
     await store.cancel();
     expect(mocked.deleteJob).toHaveBeenCalledWith(JOB);
     expect(store.phase).toBe('pick');
-    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBeNull();
+    expect(storedJobs()).toEqual([]);
   });
 
   it('cancel stops polling', async () => {
@@ -573,7 +678,6 @@ describe('resume, cancel and delete', () => {
     expect(mocked.deleteJob).toHaveBeenCalledWith(JOB);
     expect(store.phase).toBe('pick');
     expect(store.jobId).toBeNull();
-    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBeNull();
   });
 
   it('exposes the result and the download URL of a done job', async () => {

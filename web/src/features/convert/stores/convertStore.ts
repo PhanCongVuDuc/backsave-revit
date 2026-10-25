@@ -10,20 +10,22 @@ import {
   getInfo,
   getJob,
   jobFileUrl,
-  jobUploadUrl,
   type JobStatus,
   sendReport,
   type ServerInfo,
   uploadFile,
 } from '@/api';
 import { readRevitFileInfo, RevitFileError, type RevitFileInfo } from '@/shared/revit-file/readRevitFileInfo';
+import { holdUploadLock, isUploadLockHeld } from '@/shared/locks/uploadLock';
 import { safeStorage } from '@/shared/storage/safeStorage';
+
+import { type UploadEntry, uploadRegistry } from './uploadRegistry';
 
 export type ConvertPhase = 'pick' | 'ready' | 'uploading' | 'queued' | 'running' | 'done' | 'failed' | 'error';
 
 /**
  * What went wrong. In phase `error`: a reader code (`bad_extension`, `too_large`, `not_ole`, `not_revit`, `unreadable`),
- * `unsupported_year`, `server_restarted`, `expired`, `cancelled`, `upload_interrupted`, or an API code (`hourly_limit`,
+ * `unsupported_year`, `server_restarted`, `expired`, `cancelled`, `upload_in_other_tab`, or an API code (`hourly_limit`,
  * `upload_failed`, `job_gone`, `network`, …). In phase `failed`: the job's error kind (`refused`, `corrupt`, …).
  */
 export interface ConvertError {
@@ -32,15 +34,6 @@ export interface ConvertError {
   retryAfterS: number | null;
 }
 
-/** A job whose upload did not finish, found on reopening: choosing the same file again continues it. */
-export interface ResumeCandidate {
-  jobId: string;
-  uploadUrl: string;
-  name: string;
-  size: number;
-}
-
-export const JOB_STORAGE_KEY = 'backsave.job';
 export const POLL_INTERVAL_MS = 2000;
 
 const JOB_ID = /^[0-9a-f]{32}$/;
@@ -67,10 +60,10 @@ export const useConvertStore = defineStore('convert', () => {
   const droppedError = ref<string | null>(null);
   /** The finished job's output file, from the server. */
   const result = ref<JobStatus['result']>(null);
-  /** Set in phase `pick` when a reopened job still waits for its upload. */
-  const resumeCandidate = ref<ResumeCandidate | null>(null);
-  /** The file chosen for `resumeCandidate` was not the same file. */
-  const resumeMismatch = ref(false);
+  /** The current upload continues one this browser started earlier for the same file. */
+  const continuing = ref(false);
+  /** This tab created the job, or continued its upload; only such a job is deleted by `cancel`. */
+  const ownsJob = ref(false);
   const downloadUrl = computed(() => (jobId.value !== null && result.value !== null ? jobFileUrl(jobId.value) : null));
 
   const serverInfo = shallowRef<ServerInfo | null>(null);
@@ -87,30 +80,13 @@ export const useConvertStore = defineStore('convert', () => {
   let uploadedThisSession = false;
   // The tus URL of the current job, kept so an upload that gave up can be resumed with retryUpload().
   let uploadUrl: string | null = null;
-  const storage = safeStorage();
+  const uploads = uploadRegistry(safeStorage());
+  // Released when the current upload ends; other tabs see the lock while it is held.
+  let releaseLock: (() => void) | null = null;
 
-  function remember(id: string) {
-    try {
-      storage.setItem(JOB_STORAGE_KEY, id);
-    } catch {
-      // Blocked storage only costs the resume after a reload.
-    }
-  }
-
-  function forget() {
-    try {
-      storage.removeItem(JOB_STORAGE_KEY);
-    } catch {
-      // Nothing to forget when storage is blocked.
-    }
-  }
-
-  function recall(): string | null {
-    try {
-      return storage.getItem(JOB_STORAGE_KEY);
-    } catch {
-      return null;
-    }
+  function unlock() {
+    releaseLock?.();
+    releaseLock = null;
   }
 
   function onBeforeUnload(event: BeforeUnloadEvent) {
@@ -161,6 +137,7 @@ export const useConvertStore = defineStore('convert', () => {
     uploadAbort?.abort();
     uploadAbort = null;
     uploadedThisSession = false;
+    unlock();
   }
 
   function clearJob() {
@@ -177,8 +154,8 @@ export const useConvertStore = defineStore('convert', () => {
     result.value = null;
     jobId.value = null;
     uploadUrl = null;
-    resumeCandidate.value = null;
-    resumeMismatch.value = false;
+    continuing.value = false;
+    ownsJob.value = false;
     expiryScheduledFor = null;
   }
 
@@ -211,15 +188,6 @@ export const useConvertStore = defineStore('convert', () => {
     if (phase.value !== 'pick' && phase.value !== 'ready' && phase.value !== 'error') {
       return;
     }
-    const candidate = resumeCandidate.value;
-    if (candidate) {
-      if (chosen.name === candidate.name && chosen.size === candidate.size) {
-        await continueUpload(chosen, candidate);
-      } else {
-        resumeMismatch.value = true;
-      }
-      return;
-    }
     // A job left behind by an upload that gave up is abandoned with the new choice. Any other retained job may still be
     // running (for example after an unexpected polling error), so it is left alone and stays resumable.
     const abandoned = phase.value === 'error' && error.value?.code === 'upload_failed' ? jobId.value : null;
@@ -228,7 +196,8 @@ export const useConvertStore = defineStore('convert', () => {
     clearAll();
     file.value = chosen;
     if (abandoned) {
-      forget();
+      // Only this tab's own job can be in that state.
+      uploads.remove(abandoned);
       void deleteJob(abandoned).catch(() => undefined);
     }
     let read: RevitFileInfo;
@@ -245,6 +214,28 @@ export const useConvertStore = defineStore('convert', () => {
       return;
     }
     info.value = read;
+    const earlier = uploads.find(chosen);
+    if (earlier) {
+      const outcome = await checkEarlierUpload(earlier);
+      if (token !== session) {
+        return;
+      }
+      if (outcome === 'busy') {
+        fail('upload_in_other_tab');
+        return;
+      }
+      if (outcome !== 'new') {
+        // The same file's upload is still waiting on the server: continue it with the same job.
+        targets.value = [outcome.target];
+        target.value = outcome.target;
+        jobId.value = earlier.jobId;
+        uploadUrl = earlier.uploadUrl;
+        ownsJob.value = true;
+        continuing.value = true;
+        await runUpload(token, chosen, earlier.uploadUrl);
+        return;
+      }
+    }
     // A fresh array, so sorting in place touches nothing shared.
     const allowed = [...new Set(server.pairs.filter(([from]) => from === read.year).map(([, to]) => to))];
     allowed.sort((a, b) => b - a);
@@ -258,27 +249,25 @@ export const useConvertStore = defineStore('convert', () => {
     phase.value = 'ready';
   }
 
-  /** Continues the reopened job's upload with the file the user chose again; tus resumes from the server's offset. */
-  async function continueUpload(chosen: File, candidate: ResumeCandidate): Promise<void> {
-    stop();
-    const token = session;
-    file.value = chosen;
-    resumeCandidate.value = null;
-    resumeMismatch.value = false;
-    uploadUrl = candidate.uploadUrl;
-    await runUpload(token, chosen, candidate.uploadUrl);
-  }
-
-  /** Gives up the reopened job's unfinished upload: deletes the job and starts from an empty card. */
-  async function startOver(): Promise<void> {
-    const candidate = resumeCandidate.value;
-    if (!candidate) {
-      return;
+  /**
+   * Whether an upload this browser started earlier for the same file can be continued: `busy` when another tab is
+   * uploading it, `new` when its job is gone or no longer waiting (the entry is dropped then), else the job's status.
+   */
+  async function checkEarlierUpload(entry: UploadEntry): Promise<JobStatus | 'busy' | 'new'> {
+    let current: JobStatus;
+    try {
+      current = await getJob(entry.jobId);
+    } catch (cause) {
+      if (cause instanceof ApiError && (cause.status === 404 || cause.status === 410)) {
+        uploads.remove(entry.jobId);
+      }
+      return 'new';
     }
-    stop();
-    forget();
-    clearAll();
-    await deleteJob(candidate.jobId).catch(() => undefined);
+    if (current.state !== 'waiting_upload') {
+      uploads.remove(entry.jobId);
+      return 'new';
+    }
+    return (await isUploadLockHeld(entry.jobId)) ? 'busy' : current;
   }
 
   function setTarget(year: number) {
@@ -307,10 +296,10 @@ export const useConvertStore = defineStore('convert', () => {
         return;
       }
       if (cause instanceof ApiError && cause.status === 404) {
-        forget();
+        uploads.remove(id);
         fail('server_restarted');
       } else if (cause instanceof ApiError && cause.status === 410) {
-        forget();
+        uploads.remove(id);
         fail('expired');
       } else if (
         cause instanceof ApiError &&
@@ -357,6 +346,9 @@ export const useConvertStore = defineStore('convert', () => {
     expiresAt.value = current.expiresAt;
     reportCode.value = current.reportCode;
     result.value = current.result;
+    if (current.state !== 'waiting_upload') {
+      uploads.remove(id);
+    }
     switch (current.state) {
       case 'waiting_upload':
         if (uploadedThisSession) {
@@ -364,11 +356,9 @@ export const useConvertStore = defineStore('convert', () => {
           schedulePoll(token);
           return;
         }
-        // Reopened while the upload is unfinished: the user can choose the same file to continue it. The page that holds the
-        // file may be another tab still uploading, so the job is neither deleted nor forgotten here.
-        resumeCandidate.value = { jobId: id, uploadUrl: jobUploadUrl(id), name: current.name, size: current.size };
-        resumeMismatch.value = false;
-        phase.value = 'pick';
+        // Opened from a link while its upload is unfinished: the tab holding the file may still be uploading, so the job is
+        // left alone and the card starts empty. Choosing the same file in this browser continues it (see chooseFile).
+        clearAll();
         return;
       case 'queued':
       case 'running':
@@ -404,12 +394,10 @@ export const useConvertStore = defineStore('convert', () => {
         phase.value = 'failed';
         return;
       case 'cancelled':
-        forget();
         jobId.value = null;
         fail('cancelled');
         return;
       case 'expired':
-        forget();
         fail('expired');
         return;
     }
@@ -449,7 +437,8 @@ export const useConvertStore = defineStore('convert', () => {
     }
     jobId.value = created.jobId;
     uploadUrl = created.uploadUrl;
-    remember(created.jobId);
+    ownsJob.value = true;
+    uploads.add(chosen, created.jobId, created.uploadUrl);
     await runUpload(token, chosen, created.uploadUrl);
   }
 
@@ -458,6 +447,11 @@ export const useConvertStore = defineStore('convert', () => {
     error.value = null;
     const controller = new AbortController();
     uploadAbort = controller;
+    const id = jobId.value;
+    unlock();
+    if (id) {
+      releaseLock = holdUploadLock(id);
+    }
     try {
       await uploadFile(chosen, url, {
         signal: controller.signal,
@@ -472,9 +466,9 @@ export const useConvertStore = defineStore('convert', () => {
         return;
       }
       uploadAbort = null;
+      unlock();
       // The server may have moved the job on (failed for a full disk, or queued after another tab finished the upload):
       // follow it rather than showing the bare upload error.
-      const id = jobId.value;
       let current: JobStatus | null = null;
       if (id) {
         try {
@@ -490,8 +484,8 @@ export const useConvertStore = defineStore('convert', () => {
         await apply(id, current, token);
         return;
       }
-      if (cause instanceof ApiError && cause.code === 'job_gone') {
-        forget();
+      if (cause instanceof ApiError && cause.code === 'job_gone' && id) {
+        uploads.remove(id);
       }
       // `upload_failed` keeps the job and its id so the upload can be resumed.
       failFrom(cause);
@@ -501,6 +495,10 @@ export const useConvertStore = defineStore('convert', () => {
       return;
     }
     uploadAbort = null;
+    unlock();
+    if (id) {
+      uploads.remove(id);
+    }
     uploadedThisSession = true;
     progress.value = 1;
     phase.value = 'queued';
@@ -520,16 +518,18 @@ export const useConvertStore = defineStore('convert', () => {
 
   async function cancel(): Promise<void> {
     const id = jobId.value;
-    // An upload that gave up leaves its job waiting on the server; cancelling it deletes the job too.
+    const owned = ownsJob.value;
+    // An upload that gave up leaves its job waiting on the server; cancelling it deletes the job too. A job this tab only
+    // follows (opened from a link) is never deleted here: the card just goes back to the start.
     const active =
       phase.value === 'uploading' ||
       phase.value === 'queued' ||
       phase.value === 'running' ||
       (phase.value === 'error' && error.value?.code === 'upload_failed');
     stop();
-    forget();
     clearAll();
-    if (id && active) {
+    if (id && active && owned) {
+      uploads.remove(id);
       await deleteJob(id).catch(() => undefined);
     }
   }
@@ -553,7 +553,7 @@ export const useConvertStore = defineStore('convert', () => {
       }
     }
     if (token === session) {
-      forget();
+      uploads.remove(id);
       clearAll();
     }
   }
@@ -580,17 +580,15 @@ export const useConvertStore = defineStore('convert', () => {
     }
   }
 
-  /** Follows a job from the `/job/:id` link or, without an id, the one remembered in storage. */
+  /** Follows the job of a `/job/:id` link: view and download, never deleted unless the user presses Delete now. */
   async function resume(id?: string): Promise<boolean> {
-    const candidate = id ?? recall();
-    if (!candidate || !JOB_ID.test(candidate)) {
+    if (!id || !JOB_ID.test(id)) {
       return false;
     }
     stop();
     const token = session;
     clearAll();
-    jobId.value = candidate;
-    remember(candidate);
+    jobId.value = id;
     await poll(token);
     return true;
   }
@@ -618,8 +616,8 @@ export const useConvertStore = defineStore('convert', () => {
     reportCode,
     reportError,
     jobId,
-    resumeCandidate,
-    resumeMismatch,
+    continuing,
+    ownsJob,
     droppedError,
     result,
     downloadUrl,
@@ -628,7 +626,6 @@ export const useConvertStore = defineStore('convert', () => {
     setTarget,
     submit,
     retryUpload,
-    startOver,
     cancel,
     deleteNow,
     consentReport,

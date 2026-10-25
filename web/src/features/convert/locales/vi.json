@@ -34,6 +34,7 @@
     "chooseAnother": "Chọn file khác",
     "convertAnother": "Hạ file khác",
     "cancel": "Huỷ và xoá file",
+    "leave": "Về trang đầu",
     "resume": "Tiếp tục",
     "progress": {
       "label": "Tiến độ tải lên",
@@ -42,7 +43,8 @@
       "waiting": "Đang chờ — tới lượt bạn | Đang chờ — 1 file phía trước | Đang chờ — {n} file phía trước",
       "waitingUnknown": "Đang chờ trong hàng đợi",
       "converting": "Đang hạ {from} → {to} — {elapsed}",
-      "convertingEstimate": "Đang hạ {from} → {to} — {elapsed} / khoảng {estimate}"
+      "convertingEstimate": "Đang hạ {from} → {to} — {elapsed} / khoảng {estimate}",
+      "continuing": "Đang tải tiếp lần tải lên trước của bạn"
     },
     "result": {
       "title": "Đã hạ về Revit {year}",
@@ -96,7 +98,6 @@
       "server_restarted": "Máy chủ đã khởi động lại và mất file này. Vui lòng chọn lại file.",
       "expired": "Phiên chuyển đổi này đã hết hạn và file đã bị xoá.",
       "cancelled": "Phiên chuyển đổi đã bị huỷ.",
-      "upload_interrupted": "Việc tải lên chưa xong nên chưa bắt đầu chuyển đổi.",
       "hourly_limit": "Mạng của bạn đã chuyển đổi quá nhiều lần. Hãy thử lại sau {minutes} phút.",
       "active_job": "Bạn đang có một phiên chuyển đổi chạy. Hãy đợi nó xong.",
       "uploads_in_progress": "Bạn đang có file đang tải lên. Hãy đợi chúng xong.",
@@ -107,12 +108,8 @@
       "upload_failed": "Việc tải lên bị gián đoạn. Kiểm tra kết nối rồi bấm Tiếp tục.",
       "storage_error": "Máy chủ không lưu được file. Vui lòng thử lại sau.",
       "upload_closed": "Việc tải lên này đã xong hoặc đã bị dừng.",
-      "server_full": "Máy chủ đang bận với các file khác. Vui lòng thử lại sau {minutes} phút."
-    },
-    "reopen": {
-      "prompt": "Việc tải lên {name} chưa xong. Chọn lại đúng file đó để tải tiếp.",
-      "mismatch": "Đây không phải file đó. Hãy chọn lại {name}, hoặc làm lại từ đầu.",
-      "startOver": "Làm lại từ đầu"
+      "server_full": "Máy chủ đang bận với các file khác. Vui lòng thử lại sau {minutes} phút.",
+      "upload_in_other_tab": "File này đang được tải lên ở một tab khác."
     }
   }
 }
