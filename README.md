@@ -6,6 +6,8 @@ Pick a file, choose the version you need, press **Downgrade**, then download the
 
 Works with `.rvt`, `.rte`, `.rfa` and `.rft` files up to 1 GB, Revit 2023 to 2027.
 
+Made by Phan Cong Vu Duc · [LinkedIn](https://www.linkedin.com/in/phancongvuduc/)
+
 ## Is my file safe?
 
 This repository is public so you can check for yourself what happens to your file.
@@ -30,6 +32,15 @@ used for that. To have it deleted sooner, email us with the report code.
 
 The code that deletes files: [`server/src/cleanup.rs`](server/src/cleanup.rs) and
 [`server/src/reports.rs`](server/src/reports.rs).
+
+## Why only 1 GB?
+
+Backsave runs on a small server that I pay for myself. I'm an engineer building this in my spare time because I think
+it's useful, and the budget is small. That's why files are limited to 1 GB and conversions run one at a time.
+
+If you find Backsave useful and would like to help pay for a bigger server, so it can handle larger files and convert
+faster, please get in touch: phancongvuduc@gmail.com or
+[LinkedIn](https://www.linkedin.com/in/phancongvuduc/). Thank you!
 
 ## Run it yourself
 
