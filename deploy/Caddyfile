@@ -1,0 +1,19 @@
+# Caddy appends the client address to X-Forwarded-For, which the server relies on
+# (BACKSAVE_TRUST_PROXY=true in the image) to apply its per-IP limits.
+{$BACKSAVE_DOMAIN:localhost} {
+	encode gzip
+
+	# Uploads are resumable (tus) and sent in chunks of at most 50 MiB, but allow the
+	# full 1 GiB file plus overhead in case a client sends it in one request.
+	request_body {
+		max_size 1100MB
+	}
+
+	reverse_proxy server:8080 {
+		# Large uploads and long conversions: do not cut slow clients off.
+		transport http {
+			read_timeout 10m
+			write_timeout 10m
+		}
+	}
+}
