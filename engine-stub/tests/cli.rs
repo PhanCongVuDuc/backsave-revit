@@ -161,3 +161,50 @@ fn env_mode_used_when_name_has_no_token() {
         .assert()
         .code(4);
 }
+
+fn run_downgrade(dir: &Path, marker: &[u8]) -> Command {
+    let input = dir.join("in.rvt");
+    fs::write(&input, marker).unwrap();
+    let mut c = stub();
+    c.arg("downgrade")
+        .arg(&input)
+        .args(["--to", "2024", "--out"])
+        .arg(dir.join("out.rvt"))
+        .arg("--log")
+        .arg(dir.join("log.jsonl"));
+    c
+}
+
+#[test]
+fn no_log_mode_succeeds_without_log() {
+    let dir = tempfile::tempdir().unwrap();
+    run_downgrade(dir.path(), b"stub-mode=no-log").assert().success();
+    assert!(dir.path().join("out.rvt").exists());
+    assert!(!dir.path().join("log.jsonl").exists());
+}
+
+#[test]
+fn probe_hang_mode_hangs_only_probe() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("p.rvt");
+    fs::write(&input, b"stub-mode=probe-hang").unwrap();
+    stub()
+        .arg("probe")
+        .arg(&input)
+        .arg("--json")
+        .timeout(std::time::Duration::from_millis(500))
+        .assert()
+        .failure();
+    run_downgrade(dir.path(), b"stub-mode=probe-hang").assert().success();
+}
+
+#[test]
+fn hang_mode_writes_pid_file_next_to_out() {
+    let dir = tempfile::tempdir().unwrap();
+    run_downgrade(dir.path(), b"stub-mode=hang")
+        .timeout(std::time::Duration::from_millis(1500))
+        .assert()
+        .failure();
+    let pid = fs::read_to_string(dir.path().join("out.rvt.pid")).unwrap();
+    assert!(pid.trim().parse::<u32>().is_ok());
+}

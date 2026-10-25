@@ -77,6 +77,8 @@ pub struct DowngradeRequest {
 #[derive(Debug, Clone)]
 pub struct Engine {
     path: PathBuf,
+    probe_limit: Duration,
+    query_limit: Duration,
 }
 
 struct Captured {
@@ -86,15 +88,20 @@ struct Captured {
 }
 
 impl Engine {
+    /// Fixed limits: 60 s for `probe`, 30 s for `capabilities` and `--version`.
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self::with_limits(path, Duration::from_secs(60), Duration::from_secs(30))
+    }
+
+    pub fn with_limits(path: impl Into<PathBuf>, probe_limit: Duration, query_limit: Duration) -> Self {
+        Self { path: path.into(), probe_limit, query_limit }
     }
 
     /// First line of `--version`, or `"unknown"` on any failure.
     pub async fn version(&self) -> String {
         let mut cmd = Command::new(&self.path);
         cmd.arg("--version");
-        match capture(cmd, None, None).await {
+        match capture(cmd, Some(self.query_limit), None).await {
             Ok(c) if c.status.success() => String::from_utf8_lossy(&c.stdout)
                 .lines()
                 .next()
@@ -113,15 +120,15 @@ impl Engine {
         }
         let mut cmd = Command::new(&self.path);
         cmd.args(["capabilities", "--json"]);
-        let c = capture(cmd, None, None).await?;
+        let c = capture(cmd, Some(self.query_limit), None).await?;
         check_status(&c)?;
         Ok(parse_json::<Caps>(&c.stdout)?.pairs)
     }
 
-    pub async fn probe(&self, file: &Path) -> Result<Probe, EngineError> {
+    pub async fn probe(&self, file: &Path, cancel: CancellationToken) -> Result<Probe, EngineError> {
         let mut cmd = Command::new(&self.path);
         cmd.arg("probe").arg(file).arg("--json");
-        let c = capture(cmd, None, None).await?;
+        let c = capture(cmd, Some(self.probe_limit), Some(cancel)).await?;
         check_status(&c)?;
         parse_json(&c.stdout)
     }
@@ -142,8 +149,8 @@ impl Engine {
             .arg(&req.log);
         let c = capture(cmd, Some(req.limit), Some(cancel)).await?;
         check_status(&c)?;
-        let log = tokio::fs::read_to_string(&req.log).await.unwrap_or_default();
-        Ok(parse_dropped(&log))
+        let log = tokio::fs::read(&req.log).await?;
+        Ok(parse_dropped(&String::from_utf8_lossy(&log)))
     }
 }
 

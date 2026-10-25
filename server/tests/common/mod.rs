@@ -38,3 +38,35 @@ pub fn write_marker(dir: &Path, ext: &str, mode: &str, year: Option<u32>) -> Pat
     std::fs::write(&p, bytes).unwrap();
     p
 }
+
+/// Waits (up to 5 s) for the stub's pid file and returns the pid.
+pub async fn wait_for_pid(path: &Path) -> u32 {
+    for _ in 0..100 {
+        if let Ok(s) = std::fs::read_to_string(path)
+            && let Ok(pid) = s.trim().parse()
+        {
+            return pid;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("pid file {} never appeared", path.display());
+}
+
+/// True when a process with this id is still running.
+pub fn process_alive(pid: u32) -> bool {
+    if cfg!(windows) {
+        let out = Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output()
+            .expect("run tasklist");
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        let want = pid.to_string();
+        text.split_whitespace().any(|t| t == want)
+    } else {
+        Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+}

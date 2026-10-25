@@ -11,7 +11,16 @@ use std::process::exit;
 
 const MIN_YEAR: u32 = 2023;
 const MAX_YEAR: u32 = 2027;
-const MODES: [&str; 6] = ["ok", "refuse", "corrupt", "fail", "hang", "crash"];
+const MODES: [&str; 8] = [
+    "ok",
+    "refuse",
+    "corrupt",
+    "fail",
+    "hang",
+    "crash",
+    "probe-hang",
+    "no-log",
+];
 
 #[derive(Parser)]
 #[command(name = "engine-stub", version, disable_version_flag = true)]
@@ -143,10 +152,24 @@ fn check_year(year: u32) {
     }
 }
 
+/// Records this process id (for tests that check a hung stub was really killed).
+fn write_pid(path: &Path) {
+    let _ = std::fs::write(path, std::process::id().to_string());
+}
+
+fn hang_forever() -> ! {
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(3600));
+    }
+}
+
 fn probe(file: &Path) {
     let kind = kind_of(file);
     let bytes = read(file);
     let sel = select(file, &bytes);
+    if sel.mode == "probe-hang" {
+        hang_forever();
+    }
     check_year(sel.year);
     println!("{}", json!({"kind": kind, "year": sel.year, "targets": targets(sel.year)}));
 }
@@ -187,9 +210,13 @@ fn downgrade(input: &Path, to: u32, out: &Path, log: &Path) {
         "refuse" => fail(3, "Worksharing central files are not supported yet"),
         "corrupt" => fail(4, "The file is corrupt or unreadable"),
         "fail" => fail(5, "The conversion failed"),
-        "hang" => loop {
-            std::thread::sleep(std::time::Duration::from_secs(3600));
-        },
+        "hang" => {
+            // Next to the output file: `<out>.pid`.
+            let mut pid_file = out.as_os_str().to_owned();
+            pid_file.push(".pid");
+            write_pid(Path::new(&pid_file));
+            hang_forever()
+        }
         "crash" => std::process::abort(),
         _ => {}
     }
@@ -197,7 +224,10 @@ fn downgrade(input: &Path, to: u32, out: &Path, log: &Path) {
     if !targets(sel.year).contains(&to) {
         fail(3, &format!("Cannot convert a Revit {} file to {to}", sel.year));
     }
-    if std::fs::write(out, &bytes).is_err() || write_log(log, kind, sel.year, to).is_err() {
+    let write_log_file = sel.mode != "no-log";
+    if std::fs::write(out, &bytes).is_err()
+        || (write_log_file && write_log(log, kind, sel.year, to).is_err())
+    {
         let _ = std::fs::remove_file(out);
         let _ = std::fs::remove_file(log);
         fail(5, "Could not write the output");
