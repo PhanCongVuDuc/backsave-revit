@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { test as base } from '@playwright/test';
+import { expect, test as base } from '@playwright/test';
 import CFB from 'cfb';
 
 function utf16le(text: string): Buffer {
@@ -39,7 +39,29 @@ let counter = 0;
  * Every test gets its own client address (the server trusts the last X-Forwarded-For entry), so the per-address job limits
  * never couple tests together.
  */
-export const test = base.extend<{ clientIp: string }>({
+export const test = base.extend<{ clientIp: string; noPolicyViolations: undefined }, { filesDir: string }>({
+  // The generated files live for one worker and are removed with it.
+  filesDir: [
+    async ({}, use) => {
+      await use(directory);
+      rmSync(directory, { recursive: true, force: true });
+    },
+    { scope: 'worker', auto: true },
+  ],
+  // The built app must run under the server's Content-Security-Policy: any violation fails the test.
+  noPolicyViolations: [
+    async ({ page }, use) => {
+      const violations: string[] = [];
+      page.on('console', (message) => {
+        if (message.type() === 'error' && /Content Security Policy/i.test(message.text())) {
+          violations.push(message.text());
+        }
+      });
+      await use(undefined);
+      expect(violations).toEqual([]);
+    },
+    { auto: true },
+  ],
   clientIp: async ({}, use, testInfo) => {
     counter += 1;
     await use(`10.${String(testInfo.workerIndex % 250)}.${String(counter >> 8)}.${String(counter & 255)}`);
@@ -49,4 +71,4 @@ export const test = base.extend<{ clientIp: string }>({
   },
 });
 
-export { expect } from '@playwright/test';
+export { expect };

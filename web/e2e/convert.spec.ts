@@ -67,6 +67,5 @@ test('delete_now_removes_the_job', async ({ page, request }) => {
 
   // Deleting removes the job outright, so the server answers 404; 410 would mean it was kept as expired.
   const after = await request.get(`/api/jobs/${id ?? ''}`);
-  expect([404, 410]).toContain(after.status());
   expect(after.status()).toBe(404);
 });
