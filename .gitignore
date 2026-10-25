@@ -1,0 +1,10 @@
+target/
+node_modules/
+web/dist/
+data/
+*.rvt
+*.rte
+*.rfa
+*.rft
+test-results/
+playwright-report/
