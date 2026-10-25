@@ -431,6 +431,13 @@ describe('reopening', () => {
     await user().upload(screen.getByLabelText('Revit file'), file);
     await settle();
     expect(screen.getByText(en.convert.progress.continuing)).toBeInTheDocument();
+    expect(screen.getByText(en.convert.privacyContinue)).toBeInTheDocument();
+    // Nothing is sent before the button is pressed.
+    expect(mocked.uploadFile).not.toHaveBeenCalled();
+    await user().click(screen.getByRole('button', { name: en.convert.continueUpload }));
+    await settle();
+    expect(mocked.uploadFile).toHaveBeenCalledOnce();
+    expect(mocked.uploadFile.mock.calls[0]?.[1]).toBe(`/api/uploads/${JOB}`);
     expect(mocked.createJob).not.toHaveBeenCalled();
   });
 

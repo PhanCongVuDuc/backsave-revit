@@ -98,5 +98,9 @@ export function uploadRegistry(storage: KeyValueStorage, now: () => number = Dat
     all(): UploadEntry[] {
       return read();
     },
+    /** Writes back only the entries that are still recent. */
+    prune() {
+      write(read());
+    },
   };
 }

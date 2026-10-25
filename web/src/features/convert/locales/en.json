@@ -30,7 +30,9 @@
       "option": "Revit {year}"
     },
     "downgrade": "Downgrade",
+    "continueUpload": "Continue upload",
     "privacy": "Your file is only sent when you press Downgrade. It is deleted after 1 hour.",
+    "privacyContinue": "Nothing more is sent until you press Continue upload. The file is deleted after 1 hour.",
     "chooseAnother": "Choose another file",
     "convertAnother": "Convert another file",
     "cancel": "Cancel and delete file",

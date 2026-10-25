@@ -8,15 +8,27 @@ import { basicFileInfo, fileOf, makeOle } from '@/shared/revit-file/makeOle.test
 import { POLL_INTERVAL_MS, useConvertStore } from './convertStore';
 import { UPLOAD_ENTRY_MAX_AGE_MS, UPLOADS_STORAGE_KEY } from './uploadRegistry';
 
-const lock = vi.hoisted(() => ({ heldByOthers: new Set<string>(), held: [] as string[], released: [] as string[] }));
+// A shared stand-in for the browser's lock manager: every store in a test (one per tab) sees the same locks.
+const lock = vi.hoisted(() => ({
+  taken: new Set<string>(),
+  /** Grants refused even though the hint said the lock was free (another tab took it in between). */
+  refuse: new Set<string>(),
+  held: [] as string[],
+  released: [] as string[],
+}));
 
 vi.mock('@/shared/locks/uploadLock', () => ({
-  isUploadLockHeld: (jobId: string) => Promise.resolve(lock.heldByOthers.has(jobId)),
-  holdUploadLock: (jobId: string) => {
+  isUploadLockHeld: (jobId: string) => Promise.resolve(lock.taken.has(jobId)),
+  acquireUploadLock: (jobId: string) => {
+    if (lock.taken.has(jobId) || lock.refuse.has(jobId)) {
+      return Promise.resolve(null);
+    }
+    lock.taken.add(jobId);
     lock.held.push(jobId);
-    return () => {
+    return Promise.resolve(() => {
+      lock.taken.delete(jobId);
       lock.released.push(jobId);
-    };
+    });
   },
 }));
 
@@ -113,7 +125,8 @@ const ALL_PAIRS: [number, number][] = [
 beforeEach(() => {
   setActivePinia(createPinia());
   localStorage.clear();
-  lock.heldByOthers.clear();
+  lock.taken.clear();
+  lock.refuse.clear();
   lock.held = [];
   lock.released = [];
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
@@ -487,39 +500,115 @@ describe('resume, cancel and delete', () => {
     expect(storedJobs()).toEqual([JOB]);
   });
 
-  it('continues the earlier upload when the same file is chosen again', async () => {
+  it('continues the earlier upload only when its button is pressed', async () => {
     mocked.getInfo.mockResolvedValue(serverInfo(ALL_PAIRS));
     storeUpload(revitFile(2026), JOB);
     mocked.getJob
       .mockResolvedValueOnce(status({ state: 'waiting_upload', year: 2026, target: 2024 }))
       .mockResolvedValue(status({ state: 'queued', position: 0 }));
-    let finish: () => void = () => undefined;
-    mocked.uploadFile.mockReturnValue(
-      new Promise((resolve) => {
-        finish = () => {
-          resolve();
-        };
-      }),
-    );
     const store = useConvertStore();
     const same = revitFile(2026);
-    const chosen = store.chooseFile(same);
-    // Reading the file takes a few turns of the event loop.
-    for (let turn = 0; turn < 50 && store.phase !== 'uploading'; turn += 1) {
-      await vi.advanceTimersByTimeAsync(0);
-    }
-    expect(store.phase).toBe('uploading');
+    await store.chooseFile(same);
+    // Choosing the file sends nothing: the card waits for the button.
+    expect(store.phase).toBe('ready');
     expect(store.continuing).toBe(true);
-    expect(store.jobId).toBe(JOB);
     expect(store.target).toBe(2024);
+    expect(store.targets).toEqual([2024]);
+    expect(store.jobId).toBeNull();
+    expect(mocked.uploadFile).not.toHaveBeenCalled();
+    expect(lock.held).toEqual([]);
+
+    await store.submit();
+    await settle();
     expect(mocked.createJob).not.toHaveBeenCalled();
     expect(mocked.uploadFile).toHaveBeenCalledWith(same, `/api/uploads/${JOB}`, expect.anything());
+    expect(store.jobId).toBe(JOB);
     expect(lock.held).toEqual([JOB]);
-    finish();
-    await chosen;
+    expect(store.phase).toBe('queued');
+    expect(lock.released).toEqual([JOB]);
+    expect(storedJobs()).toEqual([]);
+  });
+
+  it('lock_not_granted_means_other_tab', async () => {
+    mocked.getInfo.mockResolvedValue(serverInfo(ALL_PAIRS));
+    storeUpload(revitFile(2026), JOB);
+    mocked.getJob.mockResolvedValue(status({ state: 'waiting_upload' }));
+    const store = useConvertStore();
+    await store.chooseFile(revitFile(2026));
+    expect(store.phase).toBe('ready');
+    // Another tab takes the lock between the hint and the press.
+    lock.refuse.add(JOB);
+    await store.submit();
+    expect(store.phase).toBe('error');
+    expect(store.error?.code).toBe('upload_in_other_tab');
+    expect(mocked.uploadFile).not.toHaveBeenCalled();
+    expect(store.jobId).toBeNull();
+    await store.cancel();
+    expect(mocked.deleteJob).not.toHaveBeenCalled();
+  });
+
+  it('failed_upload_keeps_lock_so_other_tab_cannot_take_over', async () => {
+    mocked.getInfo.mockResolvedValue(serverInfo(ALL_PAIRS));
+    const file = revitFile(2026);
+    const tabA = useConvertStore();
+    await tabA.chooseFile(file);
+    mocked.uploadFile.mockRejectedValueOnce(new ApiError(0, 'upload_failed', 'offline'));
+    mocked.getJob.mockResolvedValue(status({ state: 'waiting_upload' }));
+    await tabA.submit();
+    expect(tabA.error?.code).toBe('upload_failed');
+    // Tab A still holds the job's lock while it offers Resume.
+    expect(lock.taken.has(JOB)).toBe(true);
+    expect(lock.released).toEqual([]);
+
+    // Tab B, same browser, chooses the same file: it may not continue A's job.
+    setActivePinia(createPinia());
+    const tabB = useConvertStore();
+    await tabB.chooseFile(file);
+    expect(tabB.phase).toBe('error');
+    expect(tabB.error?.code).toBe('upload_in_other_tab');
+    expect(mocked.uploadFile).toHaveBeenCalledOnce();
+
+    // Tab A can still resume its own upload.
+    mocked.getJob.mockResolvedValue(status({ state: 'queued' }));
+    await tabA.retryUpload();
+    expect(mocked.uploadFile).toHaveBeenCalledTimes(2);
+    expect(tabA.phase).toBe('queued');
+    expect(lock.taken.has(JOB)).toBe(false);
+  });
+
+  it('cancel_never_deletes_job_continued_elsewhere', async () => {
+    mocked.getInfo.mockResolvedValue(serverInfo(ALL_PAIRS));
+    storeUpload(revitFile(2026), JOB);
+    mocked.getJob.mockResolvedValueOnce(status({ state: 'waiting_upload' }));
+    const store = useConvertStore();
+    await store.chooseFile(revitFile(2026));
+    // Another tab finished this upload first: the server closes it and the job is already queued.
+    mocked.uploadFile.mockRejectedValueOnce(new ApiError(409, 'upload_closed', 'closed'));
+    mocked.getJob.mockResolvedValue(status({ state: 'queued' }));
+    await store.submit();
     await settle();
     expect(store.phase).toBe('queued');
-    expect(storedJobs()).toEqual([]);
+    expect(store.ownsJob).toBe(false);
+    await store.cancel();
+    expect(mocked.deleteJob).not.toHaveBeenCalled();
+  });
+
+  it('a new file after a failed upload deletes the old job only with its lock', async () => {
+    mocked.getInfo.mockResolvedValue(serverInfo(ALL_PAIRS));
+    const store = await readyStore();
+    mocked.uploadFile.mockRejectedValueOnce(new ApiError(0, 'upload_failed', 'offline'));
+    mocked.getJob.mockResolvedValue(status({ state: 'waiting_upload' }));
+    await store.submit();
+    expect(lock.taken.has(JOB)).toBe(true);
+    await store.chooseFile(revitFile(2026, 'other.rvt'));
+    expect(mocked.deleteJob).toHaveBeenCalledWith(JOB);
+    expect(lock.taken.has(JOB)).toBe(false);
+  });
+
+  it('prunes old entries as soon as the store starts', () => {
+    storeUpload(revitFile(2026), JOB, Date.now() - UPLOAD_ENTRY_MAX_AGE_MS - 1);
+    useConvertStore();
+    expect(localStorage.getItem(UPLOADS_STORAGE_KEY)).toBeNull();
   });
 
   it('starts a new job for a different file, or the same name with another date', async () => {
@@ -537,7 +626,7 @@ describe('resume, cancel and delete', () => {
   it('says so when another tab is uploading the same file, and deletes nothing', async () => {
     mocked.getInfo.mockResolvedValue(serverInfo(ALL_PAIRS));
     storeUpload(revitFile(2026), JOB);
-    lock.heldByOthers.add(JOB);
+    lock.taken.add(JOB);
     mocked.getJob.mockResolvedValue(status({ state: 'waiting_upload' }));
     const store = useConvertStore();
     await store.chooseFile(revitFile(2026));

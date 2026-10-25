@@ -124,6 +124,7 @@ onMounted(() => {
         :name="store.file.name"
         :summary="summary"
         :targets="store.targets"
+        :continuing="store.continuing"
         @downgrade="store.submit"
         @choose-another="store.cancel"
       />

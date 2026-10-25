@@ -1,5 +1,5 @@
-// One Web Lock per upload, so other tabs of this browser can tell that an upload is in progress. Without the Locks API
-// (older browsers, tests) no lock is ever held.
+// One exclusive Web Lock per upload: the tab holding it is the only one that may send data for that job or delete it.
+// Without the Locks API (older browsers, tests) every request is granted, which is how the app behaved before locks.
 
 function lockName(jobId: string): string {
   return `backsave-upload-${jobId}`;
@@ -13,7 +13,7 @@ function locks(): LockManager | null {
   }
 }
 
-/** True when some tab holds the upload lock of this job. */
+/** A hint only: true when some tab holds the upload lock of this job right now. `acquireUploadLock` decides. */
 export async function isUploadLockHeld(jobId: string): Promise<boolean> {
   const manager = locks();
   if (!manager) {
@@ -27,16 +27,31 @@ export async function isUploadLockHeld(jobId: string): Promise<boolean> {
   }
 }
 
-/** Holds the upload lock of this job until the returned function is called or the tab closes. */
-export function holdUploadLock(jobId: string): () => void {
+/**
+ * Takes the upload lock of this job if no other tab has it. Resolves to a function that releases it, or to `null` when
+ * another tab holds it. The lock is also released when the tab closes.
+ */
+export function acquireUploadLock(jobId: string): Promise<(() => void) | null> {
   const manager = locks();
   if (!manager) {
-    return () => undefined;
+    return Promise.resolve(() => undefined);
   }
-  let release: () => void = () => undefined;
-  const released = new Promise<void>((resolve) => {
-    release = resolve;
+  return new Promise((resolveGrant) => {
+    manager
+      .request(lockName(jobId), { ifAvailable: true }, (lock) => {
+        if (!lock) {
+          resolveGrant(null);
+          return undefined;
+        }
+        // Held until the returned release function is called.
+        return new Promise<void>((release) => {
+          resolveGrant(() => {
+            release();
+          });
+        });
+      })
+      .catch(() => {
+        resolveGrant(null);
+      });
   });
-  manager.request(lockName(jobId), () => released).catch(() => undefined);
-  return release;
 }

@@ -16,7 +16,7 @@ import {
   uploadFile,
 } from '@/api';
 import { readRevitFileInfo, RevitFileError, type RevitFileInfo } from '@/shared/revit-file/readRevitFileInfo';
-import { holdUploadLock, isUploadLockHeld } from '@/shared/locks/uploadLock';
+import { acquireUploadLock, isUploadLockHeld } from '@/shared/locks/uploadLock';
 import { safeStorage } from '@/shared/storage/safeStorage';
 
 import { type UploadEntry, uploadRegistry } from './uploadRegistry';
@@ -60,7 +60,7 @@ export const useConvertStore = defineStore('convert', () => {
   const droppedError = ref<string | null>(null);
   /** The finished job's output file, from the server. */
   const result = ref<JobStatus['result']>(null);
-  /** The current upload continues one this browser started earlier for the same file. */
+  /** The card continues an upload this browser started earlier for the same file (pressing the button sends it). */
   const continuing = ref(false);
   /** This tab created the job, or continued its upload; only such a job is deleted by `cancel`. */
   const ownsJob = ref(false);
@@ -81,12 +81,38 @@ export const useConvertStore = defineStore('convert', () => {
   // The tus URL of the current job, kept so an upload that gave up can be resumed with retryUpload().
   let uploadUrl: string | null = null;
   const uploads = uploadRegistry(safeStorage());
-  // Released when the current upload ends; other tabs see the lock while it is held.
+  // Entries of uploads that were never finished go after 6 hours, even if no file is ever chosen again.
+  uploads.prune();
+  // The earlier upload the ready card would continue when its button is pressed.
+  let pendingContinue: { jobId: string; uploadUrl: string } | null = null;
+  // The job whose exclusive upload lock this tab holds, from the start of its upload until it is complete, cancelled or
+  // left for another file. Only this tab may then send data for that job or delete it.
+  let lockedJob: string | null = null;
   let releaseLock: (() => void) | null = null;
+
+  function holdsLock(id: string): boolean {
+    return lockedJob === id;
+  }
+
+  /** Takes the upload lock of `id`; false when another tab holds it. */
+  async function lock(id: string): Promise<boolean> {
+    if (holdsLock(id)) {
+      return true;
+    }
+    unlock();
+    const release = await acquireUploadLock(id);
+    if (!release) {
+      return false;
+    }
+    lockedJob = id;
+    releaseLock = release;
+    return true;
+  }
 
   function unlock() {
     releaseLock?.();
     releaseLock = null;
+    lockedJob = null;
   }
 
   function onBeforeUnload(event: BeforeUnloadEvent) {
@@ -137,7 +163,6 @@ export const useConvertStore = defineStore('convert', () => {
     uploadAbort?.abort();
     uploadAbort = null;
     uploadedThisSession = false;
-    unlock();
   }
 
   function clearJob() {
@@ -156,7 +181,9 @@ export const useConvertStore = defineStore('convert', () => {
     uploadUrl = null;
     continuing.value = false;
     ownsJob.value = false;
+    pendingContinue = null;
     expiryScheduledFor = null;
+    unlock();
   }
 
   function clearAll() {
@@ -190,13 +217,14 @@ export const useConvertStore = defineStore('convert', () => {
     }
     // A job left behind by an upload that gave up is abandoned with the new choice. Any other retained job may still be
     // running (for example after an unexpected polling error), so it is left alone and stays resumable.
-    const abandoned = phase.value === 'error' && error.value?.code === 'upload_failed' ? jobId.value : null;
+    const failedId = phase.value === 'error' && error.value?.code === 'upload_failed' ? jobId.value : null;
+    // Deleted only while this tab still holds its upload lock: otherwise another tab may be uploading it now.
+    const abandoned = failedId && ownsJob.value && holdsLock(failedId) ? failedId : null;
     stop();
     const token = session;
     clearAll();
     file.value = chosen;
     if (abandoned) {
-      // Only this tab's own job can be in that state.
       uploads.remove(abandoned);
       void deleteJob(abandoned).catch(() => undefined);
     }
@@ -225,14 +253,13 @@ export const useConvertStore = defineStore('convert', () => {
         return;
       }
       if (outcome !== 'new') {
-        // The same file's upload is still waiting on the server: continue it with the same job.
+        // The same file's upload is still waiting on the server: the button continues it with the same job. Nothing is
+        // sent before it is pressed.
         targets.value = [outcome.target];
         target.value = outcome.target;
-        jobId.value = earlier.jobId;
-        uploadUrl = earlier.uploadUrl;
-        ownsJob.value = true;
+        pendingContinue = { jobId: earlier.jobId, uploadUrl: earlier.uploadUrl };
         continuing.value = true;
-        await runUpload(token, chosen, earlier.uploadUrl);
+        phase.value = 'ready';
         return;
       }
     }
@@ -250,8 +277,9 @@ export const useConvertStore = defineStore('convert', () => {
   }
 
   /**
-   * Whether an upload this browser started earlier for the same file can be continued: `busy` when another tab is
-   * uploading it, `new` when its job is gone or no longer waiting (the entry is dropped then), else the job's status.
+   * Whether an upload this browser started earlier for the same file can be continued: `busy` when another tab seems to
+   * be uploading it (a hint; the lock taken on pressing the button decides), `new` when its job is gone or no longer
+   * waiting (the entry is dropped then), else the job's status.
    */
   async function checkEarlierUpload(entry: UploadEntry): Promise<JobStatus | 'busy' | 'new'> {
     let current: JobStatus;
@@ -412,6 +440,25 @@ export const useConvertStore = defineStore('convert', () => {
     }
     stop();
     const token = session;
+    const earlier = pendingContinue;
+    if (earlier) {
+      pendingContinue = null;
+      if (!(await lock(earlier.jobId))) {
+        if (token === session) {
+          continuing.value = false;
+          fail('upload_in_other_tab');
+        }
+        return;
+      }
+      if (token !== session) {
+        return;
+      }
+      jobId.value = earlier.jobId;
+      uploadUrl = earlier.uploadUrl;
+      ownsJob.value = true;
+      await runUpload(token, chosen, earlier.uploadUrl);
+      return;
+    }
     phase.value = 'uploading';
     progress.value = 0;
     error.value = null;
@@ -439,6 +486,11 @@ export const useConvertStore = defineStore('convert', () => {
     uploadUrl = created.uploadUrl;
     ownsJob.value = true;
     uploads.add(chosen, created.jobId, created.uploadUrl);
+    // A new job is unknown to other tabs, so the lock is always free.
+    await lock(created.jobId);
+    if (token !== session) {
+      return;
+    }
     await runUpload(token, chosen, created.uploadUrl);
   }
 
@@ -448,10 +500,6 @@ export const useConvertStore = defineStore('convert', () => {
     const controller = new AbortController();
     uploadAbort = controller;
     const id = jobId.value;
-    unlock();
-    if (id) {
-      releaseLock = holdUploadLock(id);
-    }
     try {
       await uploadFile(chosen, url, {
         signal: controller.signal,
@@ -466,7 +514,6 @@ export const useConvertStore = defineStore('convert', () => {
         return;
       }
       uploadAbort = null;
-      unlock();
       // The server may have moved the job on (failed for a full disk, or queued after another tab finished the upload):
       // follow it rather than showing the bare upload error.
       let current: JobStatus | null = null;
@@ -481,13 +528,19 @@ export const useConvertStore = defineStore('convert', () => {
         return;
       }
       if (id && current && current.state !== 'waiting_upload') {
+        unlock();
+        // A continued upload that another tab finished first is not this tab's job.
+        if (continuing.value) {
+          ownsJob.value = false;
+        }
         await apply(id, current, token);
         return;
       }
       if (cause instanceof ApiError && cause.code === 'job_gone' && id) {
+        unlock();
         uploads.remove(id);
       }
-      // `upload_failed` keeps the job and its id so the upload can be resumed.
+      // `upload_failed` keeps the job, its id and its lock so the upload can be resumed here and nowhere else.
       failFrom(cause);
       return;
     }
@@ -509,7 +562,8 @@ export const useConvertStore = defineStore('convert', () => {
   async function retryUpload(): Promise<void> {
     const chosen = file.value;
     const url = uploadUrl;
-    if (phase.value !== 'error' || error.value?.code !== 'upload_failed' || !chosen || !jobId.value || !url) {
+    const id = jobId.value;
+    if (phase.value !== 'error' || error.value?.code !== 'upload_failed' || !chosen || !id || !url || !holdsLock(id)) {
       return;
     }
     stop();
@@ -518,17 +572,17 @@ export const useConvertStore = defineStore('convert', () => {
 
   async function cancel(): Promise<void> {
     const id = jobId.value;
-    const owned = ownsJob.value;
-    // An upload that gave up leaves its job waiting on the server; cancelling it deletes the job too. A job this tab only
-    // follows (opened from a link) is never deleted here: the card just goes back to the start.
-    const active =
-      phase.value === 'uploading' ||
-      phase.value === 'queued' ||
-      phase.value === 'running' ||
-      (phase.value === 'error' && error.value?.code === 'upload_failed');
+    // Only this tab's own job is deleted: while it still waits for data, only with its upload lock (another tab may be
+    // uploading it otherwise); once queued or running after this tab's upload, nobody else can take it over. A job this
+    // tab only follows (opened from a link) is never deleted here: the card just goes back to the start.
+    const uploadingHere =
+      phase.value === 'uploading' || (phase.value === 'error' && error.value?.code === 'upload_failed');
+    const pastUpload = phase.value === 'queued' || phase.value === 'running';
+    const mayDelete =
+      id !== null && ownsJob.value && ((uploadingHere && holdsLock(id)) || (pastUpload && uploadedThisSession));
     stop();
     clearAll();
-    if (id && active && owned) {
+    if (id && mayDelete) {
       uploads.remove(id);
       await deleteJob(id).catch(() => undefined);
     }

@@ -30,7 +30,9 @@
       "option": "Revit {year}"
     },
     "downgrade": "Hạ phiên bản",
+    "continueUpload": "Tải lên tiếp",
     "privacy": "File chỉ được gửi lên khi bạn bấm Hạ phiên bản. File tự xoá sau 1 giờ.",
+    "privacyContinue": "Không gửi thêm gì cho tới khi bạn bấm Tải lên tiếp. File tự xoá sau 1 giờ.",
     "chooseAnother": "Chọn file khác",
     "convertAnother": "Hạ file khác",
     "cancel": "Huỷ và xoá file",

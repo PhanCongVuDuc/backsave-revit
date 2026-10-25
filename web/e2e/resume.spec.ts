@@ -65,6 +65,9 @@ test('reload_mid_upload_then_continue', async ({ page }) => {
   await expect(page.getByText(/did not finish/)).toBeHidden();
 
   await page.getByLabel('Revit file').setInputFiles(path);
+  // Nothing is sent until the user asks to continue.
+  await expect(page.getByText('Continuing your earlier upload')).toBeVisible();
+  await page.getByRole('button', { name: 'Continue upload' }).click();
   await expect(page.getByRole('link', { name: /^Download model_2026_R2025\.rvt/ })).toBeVisible();
   // The same job was continued, not a new one created.
   expect(page.url()).toBe(address);
