@@ -432,6 +432,16 @@ describe('resume, cancel and delete', () => {
     expect(localStorage.getItem(JOB_STORAGE_KEY)).toBeNull();
   });
 
+  it('cancel after the upload gave up deletes the waiting job', async () => {
+    const store = await readyStore();
+    mocked.uploadFile.mockRejectedValue(new ApiError(0, 'upload_failed', 'offline'));
+    await store.submit();
+    await store.cancel();
+    expect(mocked.deleteJob).toHaveBeenCalledWith(JOB);
+    expect(store.phase).toBe('pick');
+    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBeNull();
+  });
+
   it('cancel stops polling', async () => {
     const store = await readyStore();
     mocked.getJob.mockResolvedValue(status({ state: 'queued' }));
@@ -452,6 +462,19 @@ describe('resume, cancel and delete', () => {
     expect(store.phase).toBe('pick');
     expect(store.jobId).toBeNull();
     expect(localStorage.getItem(JOB_STORAGE_KEY)).toBeNull();
+  });
+
+  it('exposes the result and the download URL of a done job', async () => {
+    mocked.getJob.mockResolvedValue(
+      status({ state: 'done', result: { fileName: 'a_R2025.rvt', size: 42, droppedCount: 0 } }),
+    );
+    const store = useConvertStore();
+    await store.resume(JOB);
+    expect(store.result).toEqual({ fileName: 'a_R2025.rvt', size: 42, droppedCount: 0 });
+    expect(store.downloadUrl).toBe(api.jobFileUrl(JOB));
+    await store.deleteNow();
+    expect(store.result).toBeNull();
+    expect(store.downloadUrl).toBeNull();
   });
 
   it('$reset returns to the initial state', async () => {

@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, shallowRef, watch } from 'vue';
+import { computed, ref, shallowRef, watch } from 'vue';
 
 import {
   ApiError,
@@ -9,6 +9,7 @@ import {
   getDropped,
   getInfo,
   getJob,
+  jobFileUrl,
   type JobStatus,
   sendReport,
   type ServerInfo,
@@ -55,6 +56,9 @@ export const useConvertStore = defineStore('convert', () => {
   const jobId = ref<string | null>(null);
   /** Why the dropped list of a done job could not be loaded; `dropped` stays null then. */
   const droppedError = ref<string | null>(null);
+  /** The finished job's output file, from the server. */
+  const result = ref<JobStatus['result']>(null);
+  const downloadUrl = computed(() => (jobId.value !== null && result.value !== null ? jobFileUrl(jobId.value) : null));
 
   const serverInfo = shallowRef<ServerInfo | null>(null);
   let loading: Promise<ServerInfo> | null = null;
@@ -148,6 +152,7 @@ export const useConvertStore = defineStore('convert', () => {
     reportCode.value = null;
     reportError.value = null;
     droppedError.value = null;
+    result.value = null;
     jobId.value = null;
     uploadUrl = null;
   }
@@ -272,6 +277,7 @@ export const useConvertStore = defineStore('convert', () => {
     estimateS.value = current.estimateS;
     expiresAt.value = current.expiresAt;
     reportCode.value = current.reportCode;
+    result.value = current.result;
     switch (current.state) {
       case 'waiting_upload':
         if (uploadedThisSession) {
@@ -416,7 +422,12 @@ export const useConvertStore = defineStore('convert', () => {
 
   async function cancel(): Promise<void> {
     const id = jobId.value;
-    const active = phase.value === 'uploading' || phase.value === 'queued' || phase.value === 'running';
+    // An upload that gave up leaves its job waiting on the server; cancelling it deletes the job too.
+    const active =
+      phase.value === 'uploading' ||
+      phase.value === 'queued' ||
+      phase.value === 'running' ||
+      (phase.value === 'error' && error.value?.code === 'upload_failed');
     stop();
     forget();
     clearAll();
@@ -510,6 +521,8 @@ export const useConvertStore = defineStore('convert', () => {
     reportError,
     jobId,
     droppedError,
+    result,
+    downloadUrl,
     load,
     chooseFile,
     setTarget,

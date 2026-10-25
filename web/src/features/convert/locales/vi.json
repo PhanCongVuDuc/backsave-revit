@@ -1,0 +1,110 @@
+{
+  "convert": {
+    "title": "Hạ phiên bản file Revit",
+    "lead": "Mở model mới bằng Revit cũ. Miễn phí. File tự xoá sau 1 giờ.",
+    "status": {
+      "pick": "Chọn một file",
+      "ready": "Sẵn sàng để hạ",
+      "uploading": "Đang tải lên",
+      "queued": "Đang xếp hàng",
+      "running": "Đang chuyển đổi",
+      "done": "Đã chuyển đổi xong",
+      "failed": "Chuyển đổi thất bại",
+      "error": "Đã xảy ra lỗi"
+    },
+    "add": {
+      "button": "Thêm file Revit",
+      "drop": "hoặc thả file vào đây",
+      "limits": ".rvt, .rte, .rfa, .rft - tối đa 1 GB",
+      "input": "File Revit"
+    },
+    "kind": {
+      "rvt": "Project",
+      "rte": "Project template",
+      "rfa": "Family",
+      "rft": "Family template"
+    },
+    "summary": "Revit {year} · {kind} · {size}",
+    "target": {
+      "label": "Phiên bản Revit đích",
+      "option": "Revit {year}"
+    },
+    "downgrade": "Hạ phiên bản",
+    "privacy": "File chỉ được gửi lên khi bạn bấm Hạ phiên bản. File tự xoá sau 1 giờ.",
+    "chooseAnother": "Chọn file khác",
+    "convertAnother": "Hạ file khác",
+    "cancel": "Huỷ và xoá file",
+    "resume": "Tiếp tục",
+    "progress": {
+      "label": "Tiến độ tải lên",
+      "uploading": "Đang tải lên... {percent}%",
+      "interrupted": "Việc tải lên bị gián đoạn. Kiểm tra kết nối rồi bấm Tiếp tục.",
+      "waiting": "Đang chờ — tới lượt bạn | Đang chờ — 1 file phía trước | Đang chờ — {n} file phía trước",
+      "waitingUnknown": "Đang chờ trong hàng đợi",
+      "converting": "Đang hạ {from} → {to} — {elapsed}",
+      "convertingEstimate": "Đang hạ {from} → {to} — {elapsed} / khoảng {estimate}"
+    },
+    "result": {
+      "title": "Đã hạ về Revit {year}",
+      "download": "Tải {file} ({size})",
+      "expires": "Tự xoá lúc {time}.",
+      "deleteNow": "Xoá ngay",
+      "titleReady": "File của bạn đã sẵn sàng"
+    },
+    "dropped": {
+      "title": "Không có element nào bị bỏ | 1 element bị bỏ | {n} element bị bỏ",
+      "class": "Class",
+      "reason": "Lý do",
+      "count": "Số lượng",
+      "showIds": "Xem từng ElementId",
+      "hideIds": "Ẩn ElementId",
+      "csv": "Tải CSV",
+      "loadFailed": "Không tải được danh sách element bị bỏ. Vẫn tải được file.",
+      "loading": "Đang tải danh sách element bị bỏ...",
+      "reason_no_rule": "Chưa được hỗ trợ",
+      "reason_rule_broken": "Không chuyển đổi được",
+      "reason_cascade": "Phụ thuộc element đã bị bỏ",
+      "reasonOf_cascade": "Phụ thuộc element {id} đã bị bỏ",
+      "truncated": "Đang hiện {shown} mục đầu. File CSV có đầy đủ."
+    },
+    "failure": {
+      "refused": "Chưa được hỗ trợ: {message}",
+      "corrupt": "Không đọc được file. File có thể bị hỏng.",
+      "failed": "Chuyển đổi thất bại. Sự cố đã được ghi lại.",
+      "crashed": "Chuyển đổi thất bại. Sự cố đã được ghi lại.",
+      "timed_out": "Chuyển đổi thất bại. Sự cố đã được ghi lại.",
+      "mismatch": "File không đúng như trình duyệt báo. Vui lòng thử lại.",
+      "disk_full": "Máy chủ hết dung lượng. Vui lòng thử lại sau.",
+      "unknown": "Chuyển đổi thất bại. Sự cố đã được ghi lại."
+    },
+    "report": {
+      "consent": "Cho phép Backsave giữ file này tối đa 30 ngày để tìm và sửa lỗi. File chỉ dùng để sửa công cụ, không chia sẻ, và bị xoá sau 30 ngày hoặc khi bạn yêu cầu (bạn sẽ nhận một mã để nêu khi yêu cầu).",
+      "send": "Gửi",
+      "sent": "Cảm ơn bạn. Mã báo cáo của bạn là {code}. Hãy nêu mã này nếu bạn muốn xoá file.",
+      "failed": "Không gửi được báo cáo ({code}). Vui lòng thử lại.",
+      "failed_already_reported": "Báo cáo cho file này đã được gửi.",
+      "failed_expired": "File không còn được giữ nên không thể gửi."
+    },
+    "error": {
+      "bad_extension": "Đây không phải file Revit. Hãy chọn file .rvt, .rte, .rfa hoặc .rft.",
+      "too_large": "File lớn hơn 1 GB, là giới hạn hiện tại.",
+      "not_ole": "Đây không phải file Revit, hoặc file bị hỏng.",
+      "not_revit": "File này không giống file Revit, hoặc file bị hỏng.",
+      "unreadable": "Trình duyệt không đọc được file.",
+      "unsupported_year": "File Revit {year} chưa hạ được. Chưa có gì được gửi đi.",
+      "unsupported_pair": "Phép chuyển đổi này chưa được hỗ trợ.",
+      "server_restarted": "Máy chủ đã khởi động lại và mất file này. Vui lòng chọn lại file.",
+      "expired": "Phiên chuyển đổi này đã hết hạn và file đã bị xoá.",
+      "cancelled": "Phiên chuyển đổi đã bị huỷ.",
+      "upload_interrupted": "Việc tải lên chưa xong nên chưa bắt đầu chuyển đổi.",
+      "hourly_limit": "Mạng của bạn đã chuyển đổi quá nhiều lần. Hãy thử lại sau {minutes} phút.",
+      "active_job": "Bạn đang có một phiên chuyển đổi chạy. Hãy đợi nó xong.",
+      "uploads_in_progress": "Bạn đang có file đang tải lên. Hãy đợi chúng xong.",
+      "queue_full": "Hàng đợi đã đầy. Vui lòng thử lại sau một phút.",
+      "job_gone": "Máy chủ không còn phiên chuyển đổi này. Vui lòng chọn lại file.",
+      "network": "Không kết nối được máy chủ. Kiểm tra kết nối rồi thử lại.",
+      "unknown": "Đã xảy ra lỗi. Vui lòng thử lại.",
+      "upload_failed": "Việc tải lên bị gián đoạn. Kiểm tra kết nối rồi bấm Tiếp tục."
+    }
+  }
+}

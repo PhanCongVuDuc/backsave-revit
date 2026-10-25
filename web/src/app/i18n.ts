@@ -1,6 +1,10 @@
 import { watch } from 'vue';
 import { createI18n } from 'vue-i18n';
 
+import aboutEn from '@/features/about/locales/en.json';
+import aboutVi from '@/features/about/locales/vi.json';
+import convertEn from '@/features/convert/locales/en.json';
+import convertVi from '@/features/convert/locales/vi.json';
 import en from '@/shared/locales/en.json';
 import vi from '@/shared/locales/vi.json';
 
@@ -40,7 +44,7 @@ export function createAppI18n(browserLanguage: string, storage: LocaleStorage) {
     legacy: false,
     locale: pickLocale(browserLanguage, readRemembered(storage)),
     fallbackLocale: 'en',
-    messages: { en, vi },
+    messages: { en: { ...en, ...convertEn, ...aboutEn }, vi: { ...vi, ...convertVi, ...aboutVi } },
   });
   const reflectLocale = (locale: string) => {
     document.documentElement.lang = locale;

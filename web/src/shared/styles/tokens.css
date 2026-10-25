@@ -1,7 +1,7 @@
 :root {
   color-scheme: light dark;
 
-  --color-bg: #ffffff;
+  --color-bg: #f6f7fb;
   --color-surface: #f5f6f8;
   --color-text: #1b1f27;
   --color-text-muted: #5a6270;
@@ -9,6 +9,11 @@
   --color-primary: #2f6fdf;
   --color-primary-text: #ffffff;
   --color-focus: #2f6fdf;
+  --color-primary-soft: #e7effd;
+  --color-ok: #1a7f4b;
+  --color-danger: #b3261e;
+  --color-card: #ffffff;
+  --shadow-card: 0 10px 40px rgb(27 33 48 / 10%);
 
   --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -31,5 +36,10 @@
     --color-primary: #6b9cf0;
     --color-primary-text: #0d1117;
     --color-focus: #8db3f5;
+    --color-primary-soft: #232b3b;
+    --color-ok: #4cc38a;
+    --color-danger: #f2837b;
+    --color-card: #1d2127;
+    --shadow-card: 0 10px 40px rgb(0 0 0 / 40%);
   }
 }

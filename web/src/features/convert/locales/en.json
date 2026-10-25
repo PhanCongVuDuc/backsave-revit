@@ -1,0 +1,110 @@
+{
+  "convert": {
+    "title": "Downgrade a Revit file",
+    "lead": "Open a newer model in an older Revit. Free. Your file is deleted after 1 hour.",
+    "status": {
+      "pick": "Choose a file",
+      "ready": "Ready to downgrade",
+      "uploading": "Uploading",
+      "queued": "In the queue",
+      "running": "Converting",
+      "done": "Conversion finished",
+      "failed": "Conversion failed",
+      "error": "Something went wrong"
+    },
+    "add": {
+      "button": "Add a Revit file",
+      "drop": "or drop it here",
+      "limits": ".rvt, .rte, .rfa, .rft - up to 1 GB",
+      "input": "Revit file"
+    },
+    "kind": {
+      "rvt": "Project",
+      "rte": "Project template",
+      "rfa": "Family",
+      "rft": "Family template"
+    },
+    "summary": "Revit {year} · {kind} · {size}",
+    "target": {
+      "label": "Target Revit version",
+      "option": "Revit {year}"
+    },
+    "downgrade": "Downgrade",
+    "privacy": "Your file is only sent when you press Downgrade. It is deleted after 1 hour.",
+    "chooseAnother": "Choose another file",
+    "convertAnother": "Convert another file",
+    "cancel": "Cancel and delete file",
+    "resume": "Resume",
+    "progress": {
+      "label": "Upload progress",
+      "uploading": "Uploading... {percent}%",
+      "interrupted": "The upload was interrupted. Check your connection, then resume.",
+      "waiting": "Waiting — you are next | Waiting — 1 file ahead | Waiting — {n} files ahead",
+      "waitingUnknown": "Waiting in the queue",
+      "converting": "Converting {from} → {to} — {elapsed}",
+      "convertingEstimate": "Converting {from} → {to} — {elapsed} / about {estimate}"
+    },
+    "result": {
+      "title": "Converted to Revit {year}",
+      "download": "Download {file} ({size})",
+      "expires": "Deleted automatically at {time}.",
+      "deleteNow": "Delete now",
+      "titleReady": "Your file is ready"
+    },
+    "dropped": {
+      "title": "No elements were removed | 1 element was removed | {n} elements were removed",
+      "class": "Class",
+      "reason": "Reason",
+      "count": "Count",
+      "showIds": "Show element IDs",
+      "hideIds": "Hide element IDs",
+      "csv": "Download CSV",
+      "loadFailed": "The list of removed elements could not be loaded. The file can still be downloaded.",
+      "loading": "Loading the list of removed elements...",
+      "reason_no_rule": "Not supported yet",
+      "reason_rule_broken": "Could not be converted",
+      "reason_cascade": "Depends on a removed element",
+      "reasonOf_cascade": "Depends on removed element {id}",
+      "truncated": "Showing the first {shown}. The CSV has them all."
+    },
+    "failure": {
+      "refused": "Not supported yet: {message}",
+      "corrupt": "The file could not be read. It may be damaged.",
+      "failed": "The conversion failed. The problem has been logged.",
+      "crashed": "The conversion failed. The problem has been logged.",
+      "timed_out": "The conversion failed. The problem has been logged.",
+      "mismatch": "The file is not what the browser reported. Please try again.",
+      "disk_full": "The server is out of space. Please try again later.",
+      "unknown": "The conversion failed. The problem has been logged."
+    },
+    "report": {
+      "consent": "Let Backsave keep this file for up to 30 days to find and fix the problem. It is used only to fix the tool, never shared, and deleted after 30 days or when you ask (you will get a code to quote).",
+      "send": "Send",
+      "sent": "Thank you. Your report code is {code}. Quote it if you ask for the file to be deleted.",
+      "failed": "The report could not be sent ({code}). Please try again.",
+      "failed_already_reported": "A report for this file was already sent.",
+      "failed_expired": "The file is no longer kept, so it cannot be sent."
+    },
+    "error": {
+      "bad_extension": "This is not a Revit file. Choose a .rvt, .rte, .rfa or .rft file.",
+      "too_large": "The file is larger than 1 GB, which is the limit.",
+      "not_ole": "This file is not a Revit file, or it is damaged.",
+      "not_revit": "This file does not look like a Revit file, or it is damaged.",
+      "unreadable": "The file could not be read in your browser.",
+      "unsupported_year": "Revit {year} files cannot be downgraded yet. Nothing was sent.",
+      "unsupported_pair": "This conversion is not supported yet.",
+      "server_restarted": "The server was restarted and lost this file. Please choose it again.",
+      "expired": "This conversion has expired and its file was deleted.",
+      "cancelled": "The conversion was cancelled.",
+      "upload_interrupted": "The upload did not finish, so the conversion did not start.",
+      "hourly_limit": "Too many conversions from your network. Try again in {minutes} min.",
+      "active_job": "You already have a conversion in progress. Wait for it to finish.",
+      "uploads_in_progress": "You already have uploads in progress. Wait for them to finish.",
+      "queue_full": "The queue is full. Please try again in a minute.",
+      "job_gone": "The server no longer has this conversion. Please choose the file again.",
+      "network": "The server could not be reached. Check your connection and try again.",
+      "unknown": "Something went wrong. Please try again.",
+      "upload_failed": "The upload was interrupted. Check your connection, then resume."
+    }
+  }
+}

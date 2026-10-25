@@ -1,0 +1,52 @@
+{
+  "about": {
+    "title": "How your files are handled",
+    "intro": "Backsave for Revit converts a Revit file to an older Revit version. This page says what happens to your file and when it is deleted.",
+    "sent": {
+      "title": "When your file is sent",
+      "body": "The Revit version and the file type are read in your browser. Your file is only sent when you press Downgrade."
+    },
+    "deletion": {
+      "title": "When files are deleted",
+      "what": "File",
+      "when": "Deleted",
+      "rows": {
+        "unfinished": {
+          "what": "An upload that was not finished",
+          "when": "1 hour after it was started"
+        },
+        "original": {
+          "what": "Your original file",
+          "when": "As soon as the conversion succeeds"
+        },
+        "failed": {
+          "what": "The original of a failed conversion",
+          "when": "15 minutes after the failure, so you can choose to send it for review"
+        },
+        "output": {
+          "what": "The converted file and the list of removed elements",
+          "when": "1 hour after they are ready, or when you press Delete now"
+        },
+        "report": {
+          "what": "A file you chose to send for review",
+          "when": "After 30 days or when you ask, whichever comes first. At most 20 GB are kept; the oldest go first."
+        }
+      }
+    },
+    "cookies": {
+      "title": "Cookies and tracking",
+      "body": "Backsave sets no tracking cookies and has no analytics or advertising. Your browser keeps your language choice and the ID of a running conversion, only so the page can pick up where it left off."
+    },
+    "logs": {
+      "title": "Server logs",
+      "body": "Server logs never contain file names or file content."
+    },
+    "source": {
+      "title": "Source code",
+      "body": "The code is public, so you can check these rules yourself:",
+      "cleanup": "Deletion rules (cleanup.rs)",
+      "reports": "Review reports (reports.rs)"
+    },
+    "back": "Back to the converter"
+  }
+}

@@ -1,6 +1,14 @@
 {
-  "app": { "name": "Backsave for Revit", "language": "Language" },
-  "nav": { "convert": "Convert", "about": "How it works" },
-  "convert": { "title": "Convert a Revit file" },
-  "about": { "title": "How it works" }
+  "app": {
+    "name": "Backsave for Revit",
+    "language": "Language"
+  },
+  "nav": {
+    "about": "How your files are handled",
+    "source": "Source code",
+    "home": "Backsave for Revit home"
+  },
+  "footer": {
+    "trademark": "Revit is a registered trademark of Autodesk, Inc. Backsave is not affiliated with or endorsed by Autodesk."
+  }
 }

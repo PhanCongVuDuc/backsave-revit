@@ -1,6 +1,14 @@
 {
-  "app": { "name": "Backsave for Revit", "language": "Ngôn ngữ" },
-  "nav": { "convert": "Chuyển đổi", "about": "Cách hoạt động" },
-  "convert": { "title": "Chuyển đổi tệp Revit" },
-  "about": { "title": "Cách hoạt động" }
+  "app": {
+    "name": "Backsave for Revit",
+    "language": "Ngôn ngữ"
+  },
+  "nav": {
+    "about": "Cách xử lý file",
+    "source": "Mã nguồn",
+    "home": "Trang chủ Backsave for Revit"
+  },
+  "footer": {
+    "trademark": "Revit is a registered trademark of Autodesk, Inc. Backsave is not affiliated with or endorsed by Autodesk."
+  }
 }

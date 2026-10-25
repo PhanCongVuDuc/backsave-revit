@@ -1,0 +1,52 @@
+{
+  "about": {
+    "title": "Cách xử lý file của bạn",
+    "intro": "Backsave for Revit chuyển file Revit về phiên bản Revit cũ hơn. Trang này nói file của bạn được xử lý thế nào và khi nào bị xoá.",
+    "sent": {
+      "title": "Khi nào file được gửi",
+      "body": "Phiên bản Revit và loại file được đọc ngay trong trình duyệt. File chỉ được gửi khi bạn bấm Hạ phiên bản."
+    },
+    "deletion": {
+      "title": "Khi nào file bị xoá",
+      "what": "File",
+      "when": "Thời điểm xoá",
+      "rows": {
+        "unfinished": {
+          "what": "Việc tải lên chưa xong",
+          "when": "1 giờ sau khi bắt đầu"
+        },
+        "original": {
+          "what": "File gốc của bạn",
+          "when": "Ngay khi chuyển đổi thành công"
+        },
+        "failed": {
+          "what": "File gốc của lần chuyển đổi thất bại",
+          "when": "15 phút sau khi thất bại, để bạn chọn có gửi đi xem xét hay không"
+        },
+        "output": {
+          "what": "File đã chuyển đổi và danh sách element bị bỏ",
+          "when": "1 giờ sau khi sẵn sàng, hoặc khi bạn bấm Xoá ngay"
+        },
+        "report": {
+          "what": "File bạn chọn gửi đi xem xét",
+          "when": "Sau 30 ngày hoặc khi bạn yêu cầu, tuỳ cái nào tới trước. Giữ tối đa 20 GB; file cũ nhất bị xoá trước."
+        }
+      }
+    },
+    "cookies": {
+      "title": "Cookie và theo dõi",
+      "body": "Backsave không đặt cookie theo dõi, không có phân tích hay quảng cáo. Trình duyệt chỉ nhớ ngôn ngữ bạn chọn và mã của phiên chuyển đổi đang chạy, để trang tiếp tục được chỗ dở."
+    },
+    "logs": {
+      "title": "Nhật ký máy chủ",
+      "body": "Nhật ký máy chủ không bao giờ chứa tên file hay nội dung file."
+    },
+    "source": {
+      "title": "Mã nguồn",
+      "body": "Mã nguồn công khai, bạn có thể tự kiểm tra các quy tắc này:",
+      "cleanup": "Quy tắc xoá (cleanup.rs)",
+      "reports": "Báo cáo xem xét (reports.rs)"
+    },
+    "back": "Quay lại trang chuyển đổi"
+  }
+}
