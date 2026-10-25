@@ -19,10 +19,14 @@ command-line program.
 - No tracking cookies and no analytics.
 - Uploaded files are not shared. Sending a failure report is opt-in and asks for your consent each time.
 - Server logs never contain file names or file content.
+- To have a report deleted early, email phancongvuduc@gmail.com or open an issue at
+  https://github.com/PhanCongVuDuc/backsave-revit/issues with your report code (the code alone identifies nothing
+  about you or your file).
 
 | What | How long it is kept |
 | --- | --- |
-| Upload that was never started | Removed after 1 hour |
+| Upload not finished | Removed after 1 hour without new data (6 hours at most) |
+| Cancelled conversion | Deleted immediately |
 | Input file after a successful conversion | Deleted as soon as the conversion is done |
 | Input file after a failed conversion | 15 minutes, so you can choose to send a report |
 | Converted file and the list of dropped elements | 1 hour |
@@ -80,7 +84,9 @@ npm run test:e2e                  # builds and starts the real server on the stu
 | `BACKSAVE_WORKERS` | `1` | Conversions run at the same time |
 | `BACKSAVE_LISTEN` | `127.0.0.1:8080` | Address to listen on |
 | `BACKSAVE_WEB_DIR` | unset | Directory with the built web app to serve |
-| `BACKSAVE_TRUST_PROXY` | `false` | Take the client IP from `X-Forwarded-For` (set it behind a reverse proxy only) |
+| `BACKSAVE_TRUST_PROXY` | `false` | Take the client IP from `X-Forwarded-For` (set it behind a reverse proxy only; `false` in the Docker image, `true` in the compose file) |
+| `BACKSAVE_TRUSTED_PROXIES` | unset | Comma-separated IPs or CIDRs; when set, `X-Forwarded-For` is used only for requests from these peers |
+| `BACKSAVE_DISK_BUDGET_GIB` | `100` | Disk space all jobs may use together. Each new job reserves twice its size (input and output); when the budget is used up, new jobs get `503 server_full` |
 
 ## Self-host with Docker Compose
 
@@ -103,11 +109,16 @@ command-line contract above and run on Debian 12.
 | `GET /api/info` | Supported version pairs, size limit, output lifetime, server version |
 | `POST /api/jobs` | Create a job and get its upload location |
 | `OPTIONS`, `HEAD`, `PATCH /api/uploads/{id}` | Resumable upload (tus 1.0.0) |
-| `GET /api/jobs/{id}` | Job state, queue position, time estimate, result and error details |
+| `GET /api/jobs/{id}` | Job state, queue position, time estimate, result and error details, and the name, size, kind and versions it was created with |
 | `GET /api/jobs/{id}/file` | Download the converted file |
 | `GET /api/jobs/{id}/dropped` | Elements the engine could not carry over |
 | `POST /api/jobs/{id}/report` | Send a failed file for diagnosis (needs `{"consent": true}`) |
 | `DELETE /api/jobs/{id}` | Cancel a job and delete its files |
+
+## Contact
+
+Made by Phan Cong Vu Duc ([LinkedIn](https://www.linkedin.com/in/phancongvuduc/)). Questions and deletion requests:
+phancongvuduc@gmail.com or [GitHub issues](https://github.com/PhanCongVuDuc/backsave-revit/issues).
 
 ## License
 
