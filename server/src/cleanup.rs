@@ -24,26 +24,58 @@ pub fn wipe_jobs_dir(data: &Path) -> io::Result<()> {
     std::fs::create_dir_all(&jobs)
 }
 
-/// One retention pass. Queued and running jobs are never touched.
+/// One retention pass. Queued and running jobs are never touched. Every decision is made by
+/// the store under its lock, so a job that changed state since the snapshot is left alone.
 pub fn sweep(store: &JobStore, reports: &Reports, now: DateTime<Utc>) {
+    let upload_cutoff = now - Duration::hours(WAITING_UPLOAD_HOURS);
     for job in store.snapshot() {
         match job.state {
-            JobState::WaitingUpload
-                if job.created_at + Duration::hours(WAITING_UPLOAD_HOURS) < now =>
-            {
-                // Cancel first so an upload still in flight stops writing.
-                store.cancel(&job.id);
-                store.remove(&job.id);
+            JobState::WaitingUpload => {
+                store.remove_waiting_upload_older_than(&job.id, upload_cutoff);
             }
             JobState::Done | JobState::Failed if job.expires_at.is_some_and(|t| t < now) => {
                 store.expire(&job.id, now);
             }
-            JobState::Expired if job.expires_at.is_some_and(|t| t < now) => store.remove(&job.id),
-            JobState::Cancelled => store.remove(&job.id),
+            JobState::Expired => {
+                store.remove_expired_before(&job.id, now);
+            }
+            JobState::Cancelled => {
+                store.remove_unstarted_cancelled(&job.id);
+            }
             _ => {}
         }
     }
+    remove_orphans(store);
     reports.enforce(now);
+}
+
+/// Retries deletions that failed earlier: directories of unknown or expired jobs.
+fn remove_orphans(store: &JobStore) {
+    let Ok(entries) = std::fs::read_dir(store.jobs_dir()) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            remove_path(&entry.path());
+            continue;
+        };
+        if store.is_orphan_dir(&name) {
+            remove_path(&entry.path());
+        }
+    }
+}
+
+fn remove_path(path: &Path) {
+    let result = if path.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    };
+    if let Err(e) = result
+        && e.kind() != io::ErrorKind::NotFound
+    {
+        eprintln!("could not remove an orphaned entry: {}", e.kind());
+    }
 }
 
 /// Runs `sweep` every minute on a blocking thread, since it works on the file system.

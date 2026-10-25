@@ -348,3 +348,91 @@ async fn sweep_also_enforces_report_retention() {
     run_sweep(&f);
     assert!(report_dirs(&f).is_empty());
 }
+
+#[test]
+fn cancelled_running_job_left_for_worker() {
+    let f = setup();
+    let job = queued_job(&f, 1);
+    f.state.store.take_next().unwrap();
+    f.state.store.cancel(&job.id);
+    assert_eq!(
+        f.state.store.get(&job.id).unwrap().state,
+        JobState::Cancelled
+    );
+    advance(&f, 24 * 3600);
+    run_sweep(&f);
+    assert!(f.state.store.get(&job.id).is_some());
+    assert!(f.state.store.input_path(&job).exists());
+}
+
+#[test]
+fn orphan_dir_removed_on_next_sweep() {
+    let f = setup();
+    let jobs = f.dir.path().join("jobs");
+    let unknown = jobs.join("0".repeat(32));
+    std::fs::create_dir_all(&unknown).unwrap();
+    std::fs::write(unknown.join("in.rvt"), b"x").unwrap();
+    let junk = jobs.join("junk");
+    std::fs::create_dir_all(&junk).unwrap();
+    std::fs::write(jobs.join("stray.txt"), b"x").unwrap();
+    run_sweep(&f);
+    assert!(!unknown.exists());
+    assert!(!junk.exists());
+    assert!(!jobs.join("stray.txt").exists());
+}
+
+#[test]
+fn expired_job_dir_retried() {
+    let f = setup();
+    let job = done_job(&f, 1);
+    advance(&f, 3601);
+    run_sweep(&f);
+    assert_eq!(f.state.store.get(&job.id).unwrap().state, JobState::Expired);
+    // Pretend the first delete failed: the directory is back.
+    let dir = f.state.store.job_dir(&job);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("out.rvt"), b"left over").unwrap();
+    run_sweep(&f);
+    assert!(!dir.exists());
+    assert!(f.state.store.get(&job.id).is_some(), "record kept for 410");
+}
+
+#[test]
+fn live_job_dirs_untouched() {
+    let f = setup();
+    let failed = failed_job(&f, 3);
+    let done = done_job(&f, 4);
+    let waiting = new_job(&f, 1);
+    let queued = queued_job(&f, 2);
+    run_sweep(&f);
+    for job in [&waiting, &queued, &failed, &done] {
+        assert!(f.state.store.job_dir(job).is_dir(), "{:?}", job.state);
+    }
+}
+
+#[tokio::test]
+async fn report_on_expired_job_is_410() {
+    let f = setup();
+    let job = failed_job(&f, 1);
+    advance(&f, 16 * 60);
+    run_sweep(&f);
+    assert_eq!(f.state.store.get(&job.id).unwrap().state, JobState::Expired);
+    let resp = send(&f, post_report(&job.id.to_string(), r#"{"consent":true}"#)).await;
+    assert_eq!(resp.status(), StatusCode::GONE);
+    assert_eq!(body_json(resp).await["error"]["code"], "expired");
+    assert!(report_dirs(&f).is_empty());
+}
+
+#[tokio::test]
+async fn concurrent_reports_make_one_report() {
+    let f = setup();
+    let id = failed_job(&f, 1).id.to_string();
+    let (a, b) = tokio::join!(
+        send(&f, post_report(&id, r#"{"consent":true}"#)),
+        send(&f, post_report(&id, r#"{"consent":true}"#)),
+    );
+    let mut statuses = [a.status().as_u16(), b.status().as_u16()];
+    statuses.sort();
+    assert_eq!(statuses, [201, 409]);
+    assert_eq!(report_dirs(&f).len(), 1);
+}

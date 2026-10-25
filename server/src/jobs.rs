@@ -92,6 +92,8 @@ pub struct Job {
     pub received: u64,
     pub cancel: CancellationToken,
     pub report_code: Option<String>,
+    /// True while a report for this job is being written.
+    pub reporting: bool,
     /// Insertion order, used to break ties in FIFO ordering.
     seq: u64,
 }
@@ -103,6 +105,16 @@ pub struct NewJob {
     pub kind: FileKind,
     pub year: u16,
     pub target: u16,
+}
+
+/// What `JobStore::claim_report` found.
+#[derive(Debug, Clone)]
+pub enum ReportClaim {
+    Claimed(Box<Job>),
+    NotFound,
+    NotFailed,
+    Expired,
+    AlreadyReported,
 }
 
 /// What `JobStore::cancel` found.
@@ -259,6 +271,7 @@ impl JobStore {
             received: 0,
             cancel: CancellationToken::new(),
             report_code: None,
+            reporting: false,
             seq,
         };
         if std::fs::create_dir_all(self.job_dir(&job)).is_err() {
@@ -414,6 +427,94 @@ impl JobStore {
         }
     }
 
+    /// Directory holding every job's files.
+    pub fn jobs_dir(&self) -> PathBuf {
+        self.data_dir.join("jobs")
+    }
+
+    /// Atomically claims the right to write a report for a failed job. Only one caller at a
+    /// time (and only once per job) gets `Claimed`; `release_report` gives the claim back.
+    pub fn claim_report(&self, id: &JobId) -> ReportClaim {
+        let mut g = self.lock();
+        let Some(j) = g.jobs.get_mut(id) else {
+            return ReportClaim::NotFound;
+        };
+        match j.state {
+            JobState::Failed => {}
+            JobState::Expired => return ReportClaim::Expired,
+            _ => return ReportClaim::NotFailed,
+        }
+        if j.reporting || j.report_code.is_some() {
+            return ReportClaim::AlreadyReported;
+        }
+        j.reporting = true;
+        ReportClaim::Claimed(Box::new(j.clone()))
+    }
+
+    pub fn release_report(&self, id: &JobId) {
+        if let Some(j) = self.lock().jobs.get_mut(id) {
+            j.reporting = false;
+        }
+    }
+
+    /// Removes a job that is still waiting for its upload and was created before `cutoff`. The
+    /// state and age are checked under the lock, so a job that has been queued or taken by a
+    /// worker in the meantime is left alone.
+    pub fn remove_waiting_upload_older_than(&self, id: &JobId, cutoff: DateTime<Utc>) -> bool {
+        self.remove_if(id, |j| {
+            j.state == JobState::WaitingUpload && j.created_at < cutoff
+        })
+    }
+
+    /// Removes a cancelled job that never started. A cancelled job that was running belongs to
+    /// its worker, which removes it once the engine has exited.
+    pub fn remove_unstarted_cancelled(&self, id: &JobId) -> bool {
+        self.remove_if(id, |j| {
+            j.state == JobState::Cancelled && j.started_at.is_none()
+        })
+    }
+
+    /// Removes an expired record whose 24 hours are over.
+    pub fn remove_expired_before(&self, id: &JobId, now: DateTime<Utc>) -> bool {
+        self.remove_if(id, |j| {
+            j.state == JobState::Expired && j.expires_at.is_some_and(|t| t < now)
+        })
+    }
+
+    fn remove_if(&self, id: &JobId, cond: impl FnOnce(&Job) -> bool) -> bool {
+        let job = {
+            let mut g = self.lock();
+            if !g.jobs.get(id).is_some_and(cond) {
+                return false;
+            }
+            g.jobs.remove(id).expect("job present")
+        };
+        job.cancel.cancel();
+        self.delete_dir(&job);
+        true
+    }
+
+    fn delete_dir(&self, job: &Job) {
+        if let Err(e) = std::fs::remove_dir_all(self.job_dir(job))
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("could not remove job directory: {}", e.kind());
+        }
+    }
+
+    /// True when a directory under `jobs/` belongs to no live job: its name is not a job id,
+    /// the store does not know the id, or the job has expired. Decided under the lock, which
+    /// `create` also holds while it makes a directory and records the job.
+    pub fn is_orphan_dir(&self, name: &str) -> bool {
+        let Ok(id) = name.parse::<JobId>() else {
+            return true;
+        };
+        self.lock()
+            .jobs
+            .get(&id)
+            .is_none_or(|j| j.state == JobState::Expired)
+    }
+
     /// A copy of every job, for the retention sweep.
     pub fn snapshot(&self) -> Vec<Job> {
         self.lock().jobs.values().cloned().collect()
@@ -443,11 +544,12 @@ impl JobStore {
         true
     }
 
-    /// Records the report code of a failed job; false when the job is gone or already has one.
+    /// Records the report code of a job; false when the job is gone or already has one.
     pub fn set_report_code(&self, id: &JobId, code: String) -> bool {
         match self.lock().jobs.get_mut(id) {
             Some(j) if j.report_code.is_none() => {
                 j.report_code = Some(code);
+                j.reporting = false;
                 true
             }
             _ => false,
@@ -872,5 +974,82 @@ mod tests {
         let mut want = vec![a.id.to_string(), b.id.to_string()];
         want.sort();
         assert_eq!(ids, want);
+    }
+
+    #[test]
+    fn waiting_removal_rechecks_state_under_the_lock() {
+        let (s, c, _d) = setup();
+        let a = s.create(req(), ip(1), &pairs()).unwrap();
+        let cutoff = c.now() + chrono::Duration::hours(2);
+        let stale = s.snapshot();
+        assert_eq!(stale[0].state, JobState::WaitingUpload);
+        // The upload completes after the snapshot was taken.
+        s.mark_uploaded(&a.id);
+        assert!(!s.remove_waiting_upload_older_than(&a.id, cutoff));
+        assert_eq!(s.get(&a.id).unwrap().state, JobState::Queued);
+        assert!(s.job_dir(&a).exists());
+        // A job still waiting and old enough goes; one not old enough stays.
+        let b = s.create(req(), ip(2), &pairs()).unwrap();
+        assert!(!s.remove_waiting_upload_older_than(&b.id, c.now()));
+        assert!(s.remove_waiting_upload_older_than(&b.id, cutoff));
+        assert!(s.get(&b.id).is_none());
+        assert!(!s.job_dir(&b).exists());
+    }
+
+    #[test]
+    fn only_unstarted_cancelled_jobs_are_removed() {
+        let (s, _c, _d) = setup();
+        let a = s.create(req(), ip(1), &pairs()).unwrap();
+        s.cancel(&a.id);
+        assert!(s.remove_unstarted_cancelled(&a.id));
+        assert!(s.get(&a.id).is_none());
+
+        let b = s.create(req(), ip(2), &pairs()).unwrap();
+        s.mark_uploaded(&b.id);
+        s.take_next().unwrap();
+        s.cancel(&b.id);
+        assert_eq!(s.get(&b.id).unwrap().state, JobState::Cancelled);
+        assert!(!s.remove_unstarted_cancelled(&b.id));
+        assert!(s.job_dir(&b).exists());
+    }
+
+    #[test]
+    fn claim_report_is_exclusive() {
+        let (s, _c, _d) = setup();
+        let a = s.create(req(), ip(1), &pairs()).unwrap();
+        assert!(matches!(s.claim_report(&a.id), ReportClaim::NotFailed));
+        assert!(matches!(
+            s.claim_report(&JobId::random()),
+            ReportClaim::NotFound
+        ));
+        s.mark_uploaded(&a.id);
+        s.take_next().unwrap();
+        s.finish(&a.id, Err((ErrorKind::Failed, "x".into())));
+        assert!(matches!(s.claim_report(&a.id), ReportClaim::Claimed(_)));
+        assert!(matches!(
+            s.claim_report(&a.id),
+            ReportClaim::AlreadyReported
+        ));
+        s.release_report(&a.id);
+        assert!(matches!(s.claim_report(&a.id), ReportClaim::Claimed(_)));
+        assert!(s.set_report_code(&a.id, "R-AAAAAA".into()));
+        assert!(matches!(
+            s.claim_report(&a.id),
+            ReportClaim::AlreadyReported
+        ));
+        s.expire(&a.id, _c.now());
+        assert!(matches!(s.claim_report(&a.id), ReportClaim::Expired));
+    }
+
+    #[test]
+    fn orphan_dir_detection() {
+        let (s, _c, _d) = setup();
+        let live = s.create(req(), ip(1), &pairs()).unwrap();
+        assert!(!s.is_orphan_dir(&live.id.to_string()));
+        assert!(s.is_orphan_dir("not-an-id"));
+        assert!(s.is_orphan_dir(&JobId::random().to_string()));
+        let done = done_job(&s);
+        s.expire(&done.id, _c.now());
+        assert!(s.is_orphan_dir(&done.id.to_string()));
     }
 }

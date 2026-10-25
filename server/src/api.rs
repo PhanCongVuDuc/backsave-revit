@@ -1,7 +1,7 @@
 //! JSON API under `/api`: server info, job creation, status, downloads and deletion.
 
 use crate::AppState;
-use crate::jobs::{CancelOutcome, Job, JobId, NewJob};
+use crate::jobs::{CancelOutcome, Job, JobId, NewJob, ReportClaim};
 use crate::model::{ApiError, DroppedElement, ErrorKind, FileKind, JobState, estimate};
 use axum::Json;
 use axum::Router;
@@ -333,40 +333,57 @@ async fn report_job(
             "Sending a report needs your consent.",
         ));
     }
-    let job = load_job(&s, &raw)?;
-    match job.state {
-        JobState::Failed => {}
-        JobState::Expired => return Err(expired()),
-        _ => {
+    let id: JobId = raw.parse().map_err(|_| not_found())?;
+    // The claim is atomic: of two concurrent requests only one proceeds.
+    let job = match s.store.claim_report(&id) {
+        ReportClaim::Claimed(job) => *job,
+        ReportClaim::NotFound => return Err(not_found()),
+        ReportClaim::Expired => return Err(expired()),
+        ReportClaim::NotFailed => {
             return Err(ApiError::new(
                 StatusCode::CONFLICT,
                 "not_failed",
                 "Only a failed conversion can be reported.",
             ));
         }
-    }
-    if job.report_code.is_some() {
-        return Err(ApiError::new(
-            StatusCode::CONFLICT,
-            "already_reported",
-            "This conversion was already reported.",
-        ));
-    }
+        ReportClaim::AlreadyReported => {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "already_reported",
+                "This conversion was already reported.",
+            ));
+        }
+    };
     let input = s.store.input_path(&job);
     let log = s.store.log_path(&job);
     let (reports, version, now) = (s.reports.clone(), s.engine_version.clone(), s.clock.now());
     let made = {
         let job = job.clone();
-        tokio::task::spawn_blocking(move || reports.create(&job, &input, &log, &version, now))
-            .await
-            .map_err(|_| internal())?
+        tokio::task::spawn_blocking(move || {
+            let made = reports.create(&job, &input, &log, &version, now);
+            if made.is_ok() {
+                reports.enforce(now);
+            }
+            made
+        })
+        .await
+        .unwrap_or_else(|_| Err(std::io::Error::other("report task panicked")))
     };
     let code = match made {
         Ok(code) => code,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(expired()),
-        Err(_) => return Err(internal()),
+        Err(e) => {
+            s.store.release_report(&job.id);
+            return Err(if e.kind() == std::io::ErrorKind::NotFound {
+                expired()
+            } else {
+                internal()
+            });
+        }
     };
-    s.store.set_report_code(&job.id, code.clone());
+    if !s.store.set_report_code(&job.id, code.clone()) {
+        // The job vanished while the report was being written; the report itself is kept.
+        eprintln!("report written for a job that no longer exists");
+    }
     Ok((StatusCode::CREATED, Json(json!({ "report_code": code }))).into_response())
 }
 
