@@ -4,6 +4,7 @@ pub mod engine;
 pub mod jobs;
 pub mod model;
 pub mod upload;
+pub mod worker;
 
 use std::sync::Arc;
 
