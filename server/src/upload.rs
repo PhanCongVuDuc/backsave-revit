@@ -15,7 +15,7 @@ use axum::routing::{options, patch};
 use http_body_util::BodyExt;
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 const TUS_VERSION: &str = "1.0.0";
 const OFFSET_CONTENT_TYPE: &str = "application/offset+octet-stream";
@@ -120,7 +120,9 @@ async fn head_upload(
 fn storage_error(state: &AppState, job: &Job) -> ApiError {
     let path = state.store.input_path(job);
     if std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_file()) {
-        let _ = std::fs::remove_file(&path);
+        if let Err(e) = std::fs::remove_file(&path) {
+            eprintln!("could not remove partial upload: {}", e.kind());
+        }
     }
     let message = "The server could not store the file.";
     state
@@ -201,13 +203,32 @@ async fn patch_upload(
         Ok(f) => f,
         Err(_) => return Err(storage_error(&state, &job)),
     };
+    let received = write_body(&state, &job, &mut file, body).await?;
+    drop(file);
+    if received == job.size {
+        state.store.mark_uploaded(&job.id);
+    }
+    let mut resp = StatusCode::NO_CONTENT.into_response();
+    resp.headers_mut()
+        .insert(UPLOAD_OFFSET, HeaderValue::from(received));
+    Ok(resp)
+}
 
-    let mut body = body;
+/// Appends the body to `writer`, flushing each chunk before it is counted, so `received` only ever covers
+/// bytes the writer accepted. Any write or flush failure removes the partial input and fails the job.
+async fn write_body<W>(
+    state: &AppState,
+    job: &Job,
+    writer: &mut W,
+    mut body: Body,
+) -> Result<u64, ApiError>
+where
+    W: AsyncWrite + Unpin,
+{
     let mut received = job.received;
     while let Some(frame) = body.frame().await {
         let Ok(frame) = frame else {
-            // The client went away; what was written stays and HEAD reports it.
-            let _ = file.flush().await;
+            // The client went away; what was counted stays on disk and HEAD reports it.
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "upload_interrupted",
@@ -218,25 +239,99 @@ async fn patch_upload(
             continue;
         };
         if received + chunk.len() as u64 > job.size {
-            let _ = file.flush().await;
             return Err(too_large());
         }
-        if file.write_all(&chunk).await.is_err() {
-            drop(file);
-            return Err(storage_error(&state, &job));
+        if writer.write_all(&chunk).await.is_err() || writer.flush().await.is_err() {
+            return Err(storage_error(state, job));
         }
         received = state.store.add_received(&job.id, chunk.len() as u64);
     }
-    if file.flush().await.is_err() {
-        drop(file);
-        return Err(storage_error(&state, &job));
+    Ok(received)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::clock::ManualClock;
+    use crate::config::Config;
+    use crate::engine::Engine;
+    use crate::jobs::{JobStore, NewJob};
+    use crate::model::FileKind;
+    use std::io;
+    use std::pin::Pin;
+    use std::sync::Arc;
+    use std::task::{Context, Poll};
+
+    /// Accepts the first write, fails every write after it.
+    struct FailsOnSecondWrite(u32);
+
+    impl AsyncWrite for FailsOnSecondWrite {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            self.0 += 1;
+            if self.0 > 1 {
+                return Poll::Ready(Err(io::Error::other("disk full")));
+            }
+            Poll::Ready(Ok(buf.len()))
+        }
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+        fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
     }
-    drop(file);
-    if received == job.size {
-        state.store.mark_uploaded(&job.id);
+
+    #[tokio::test]
+    async fn failed_second_write_removes_partial_file_and_fails_job() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(ManualClock::new(
+            chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap(),
+        ));
+        let config =
+            Config::from_lookup(|k| (k == "BACKSAVE_ENGINE").then(|| "x".to_string())).unwrap();
+        let state = AppState {
+            store: Arc::new(JobStore::new(dir.path().to_path_buf(), clock.clone())),
+            engine: Arc::new(Engine::new("x")),
+            config: Arc::new(config),
+            pairs: Arc::new(vec![(2026, 2024)]),
+            clock,
+        };
+        let req = NewJob {
+            name: "a.rvt".into(),
+            size: 100,
+            kind: FileKind::Rvt,
+            year: 2026,
+            target: 2024,
+        };
+        let job = state
+            .store
+            .create(req, std::net::IpAddr::from([10, 0, 0, 1]), &state.pairs)
+            .unwrap();
+        // Bytes from an earlier chunk are already on disk.
+        let input = state.store.input_path(&job);
+        std::fs::write(&input, b"earlier").unwrap();
+
+        let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, io::Error>>(4);
+        tx.send(Ok(b"one".to_vec())).await.unwrap();
+        tx.send(Ok(b"two".to_vec())).await.unwrap();
+        drop(tx);
+        let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|item| (item, rx))
+        });
+        let mut writer = FailsOnSecondWrite(0);
+        let err = write_body(&state, &job, &mut writer, Body::from_stream(stream))
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.status, StatusCode::INSUFFICIENT_STORAGE);
+        let after = state.store.get(&job.id).unwrap();
+        assert_eq!(after.state, JobState::Failed);
+        assert_eq!(after.error.unwrap().kind, ErrorKind::DiskFull);
+        assert_eq!(after.received, 3, "only the accepted chunk is counted");
+        assert!(!input.exists(), "partial input must be removed");
     }
-    let mut resp = StatusCode::NO_CONTENT.into_response();
-    resp.headers_mut()
-        .insert(UPLOAD_OFFSET, HeaderValue::from(received));
-    Ok(resp)
 }
