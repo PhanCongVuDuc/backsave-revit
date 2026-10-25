@@ -18,6 +18,7 @@ const MAX_WAITING_UPLOADS: usize = 2;
 const MAX_QUEUED: usize = 20;
 const DONE_RETENTION_MIN: i64 = 60;
 const FAILED_RETENTION_MIN: i64 = 15;
+const EXPIRED_RECORD_HOURS: i64 = 24;
 
 /// A 128-bit random identifier rendered as 32 lowercase hex characters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -413,6 +414,46 @@ impl JobStore {
         }
     }
 
+    /// A copy of every job, for the retention sweep.
+    pub fn snapshot(&self) -> Vec<Job> {
+        self.lock().jobs.values().cloned().collect()
+    }
+
+    /// Turns a finished (done or failed) job into `Expired`: its files are deleted and the record
+    /// stays for 24 hours so that clients get "gone" rather than "not found". Returns false when
+    /// the job is missing or in another state.
+    pub fn expire(&self, id: &JobId, now: DateTime<Utc>) -> bool {
+        let job = {
+            let mut g = self.lock();
+            match g.jobs.get_mut(id) {
+                Some(j) if matches!(j.state, JobState::Done | JobState::Failed) => {
+                    j.state = JobState::Expired;
+                    j.expires_at = Some(now + Duration::hours(EXPIRED_RECORD_HOURS));
+                    j.dropped = Vec::new();
+                    j.clone()
+                }
+                _ => return false,
+            }
+        };
+        if let Err(e) = std::fs::remove_dir_all(self.job_dir(&job))
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("could not remove job directory: {}", e.kind());
+        }
+        true
+    }
+
+    /// Records the report code of a failed job; false when the job is gone or already has one.
+    pub fn set_report_code(&self, id: &JobId, code: String) -> bool {
+        match self.lock().jobs.get_mut(id) {
+            Some(j) if j.report_code.is_none() => {
+                j.report_code = Some(code);
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Forgets the job and deletes its directory.
     pub fn remove(&self, id: &JobId) {
         let job = self.lock().jobs.remove(id);
@@ -773,5 +814,63 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(got.id, a.id);
+    }
+
+    fn done_job(s: &JobStore) -> Job {
+        let a = s.create(req(), ip(1), &pairs()).unwrap();
+        std::fs::write(s.input_path(&a), b"x").unwrap();
+        s.mark_uploaded(&a.id);
+        s.take_next().unwrap();
+        s.finish(&a.id, Ok(Vec::new()));
+        s.get(&a.id).unwrap()
+    }
+
+    #[test]
+    fn expire_deletes_files_and_keeps_record_for_a_day() {
+        let (s, c, _d) = setup();
+        let a = done_job(&s);
+        let now = c.now();
+        assert!(s.expire(&a.id, now));
+        let after = s.get(&a.id).unwrap();
+        assert_eq!(after.state, JobState::Expired);
+        assert_eq!(after.expires_at, Some(now + chrono::Duration::hours(24)));
+        assert!(!s.job_dir(&a).exists());
+        assert!(!s.expire(&a.id, now), "only done or failed jobs expire");
+    }
+
+    #[test]
+    fn expire_ignores_queued_and_unknown_jobs() {
+        let (s, c, _d) = setup();
+        let a = s.create(req(), ip(1), &pairs()).unwrap();
+        s.mark_uploaded(&a.id);
+        assert!(!s.expire(&a.id, c.now()));
+        assert_eq!(s.get(&a.id).unwrap().state, JobState::Queued);
+        assert!(s.job_dir(&a).exists());
+        assert!(!s.expire(&JobId::random(), c.now()));
+    }
+
+    #[test]
+    fn set_report_code_only_once() {
+        let (s, _c, _d) = setup();
+        let a = done_job(&s);
+        assert!(s.set_report_code(&a.id, "R-AAAAAA".into()));
+        assert!(!s.set_report_code(&a.id, "R-BBBBBB".into()));
+        assert_eq!(
+            s.get(&a.id).unwrap().report_code.as_deref(),
+            Some("R-AAAAAA")
+        );
+        assert!(!s.set_report_code(&JobId::random(), "R-CCCCCC".into()));
+    }
+
+    #[test]
+    fn snapshot_lists_every_job() {
+        let (s, _c, _d) = setup();
+        let a = s.create(req(), ip(1), &pairs()).unwrap();
+        let b = s.create(req(), ip(2), &pairs()).unwrap();
+        let mut ids: Vec<_> = s.snapshot().iter().map(|j| j.id.to_string()).collect();
+        ids.sort();
+        let mut want = vec![a.id.to_string(), b.id.to_string()];
+        want.sort();
+        assert_eq!(ids, want);
     }
 }

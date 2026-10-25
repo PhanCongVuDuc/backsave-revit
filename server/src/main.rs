@@ -1,7 +1,9 @@
+use backsave_server::cleanup::{spawn_cleanup, wipe_jobs_dir};
 use backsave_server::clock::SystemClock;
 use backsave_server::config::Config;
 use backsave_server::engine::Engine;
 use backsave_server::jobs::JobStore;
+use backsave_server::reports::Reports;
 use backsave_server::worker::spawn_workers;
 use backsave_server::{AppState, app};
 use std::net::SocketAddr;
@@ -21,13 +23,7 @@ async fn run() -> anyhow::Result<()> {
     let config = Config::from_env()?;
 
     // Jobs never survive a restart: start from an empty jobs directory.
-    let jobs_dir = config.data.join("jobs");
-    match std::fs::remove_dir_all(&jobs_dir) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e).context("could not clear the jobs directory"),
-    }
-    std::fs::create_dir_all(&jobs_dir).context("could not create the jobs directory")?;
+    wipe_jobs_dir(&config.data).context("could not reset the jobs directory")?;
     std::fs::create_dir_all(config.data.join("reports"))
         .context("could not create the reports directory")?;
 
@@ -40,6 +36,9 @@ async fn run() -> anyhow::Result<()> {
     let clock = Arc::new(SystemClock);
     let store = Arc::new(JobStore::new(config.data.clone(), clock.clone()));
     spawn_workers(config.workers, store.clone(), engine.clone());
+    let reports = Arc::new(Reports::new(config.data.join("reports")));
+    spawn_cleanup(store.clone(), reports.clone(), clock.clone());
+    let engine_version = Arc::new(engine.version().await);
 
     let listen = config.listen;
     let state = AppState {
@@ -48,6 +47,8 @@ async fn run() -> anyhow::Result<()> {
         config: Arc::new(config),
         pairs: Arc::new(pairs),
         clock,
+        reports,
+        engine_version,
     };
     let listener = tokio::net::TcpListener::bind(listen)
         .await

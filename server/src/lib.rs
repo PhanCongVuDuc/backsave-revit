@@ -1,9 +1,11 @@
 pub mod api;
+pub mod cleanup;
 pub mod clock;
 pub mod config;
 pub mod engine;
 pub mod jobs;
 pub mod model;
+pub mod reports;
 pub mod upload;
 pub mod worker;
 
@@ -22,6 +24,9 @@ pub struct AppState {
     pub config: Arc<config::Config>,
     pub pairs: Arc<Vec<(u16, u16)>>,
     pub clock: Arc<dyn clock::Clock>,
+    pub reports: Arc<reports::Reports>,
+    /// First line of the engine's `--version`, read once at startup.
+    pub engine_version: Arc<String>,
 }
 
 /// The whole HTTP application: API, uploads and (when configured) the static web files.

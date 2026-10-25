@@ -105,5 +105,9 @@ pub fn test_state(
         config: Arc::new(config),
         pairs: Arc::new(pairs),
         clock,
+        reports: Arc::new(backsave_server::reports::Reports::new(
+            data_dir.join("reports"),
+        )),
+        engine_version: Arc::new("engine-stub 0.1.0".to_string()),
     }
 }

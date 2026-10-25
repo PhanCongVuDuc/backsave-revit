@@ -27,6 +27,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/jobs/{id}", get(get_job).delete(delete_job))
         .route("/api/jobs/{id}/file", get(download_file))
         .route("/api/jobs/{id}/dropped", get(dropped))
+        .route("/api/jobs/{id}/report", post(report_job))
         .route("/api", any(api_not_found))
         .route("/api/{*rest}", any(api_not_found))
 }
@@ -317,6 +318,66 @@ async fn delete_job(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Opt-in failure report: moves the failed job's input and log to the reports directory.
+async fn report_job(
+    State(s): State<AppState>,
+    Path(raw): Path<String>,
+    body: Result<Json<serde_json::Value>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let consent =
+        matches!(&body, Ok(Json(v)) if v.get("consent") == Some(&serde_json::Value::Bool(true)));
+    if !consent {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "consent_required",
+            "Sending a report needs your consent.",
+        ));
+    }
+    let job = load_job(&s, &raw)?;
+    match job.state {
+        JobState::Failed => {}
+        JobState::Expired => return Err(expired()),
+        _ => {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "not_failed",
+                "Only a failed conversion can be reported.",
+            ));
+        }
+    }
+    if job.report_code.is_some() {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "already_reported",
+            "This conversion was already reported.",
+        ));
+    }
+    let input = s.store.input_path(&job);
+    let log = s.store.log_path(&job);
+    let (reports, version, now) = (s.reports.clone(), s.engine_version.clone(), s.clock.now());
+    let made = {
+        let job = job.clone();
+        tokio::task::spawn_blocking(move || reports.create(&job, &input, &log, &version, now))
+            .await
+            .map_err(|_| internal())?
+    };
+    let code = match made {
+        Ok(code) => code,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(expired()),
+        Err(_) => return Err(internal()),
+    };
+    s.store.set_report_code(&job.id, code.clone());
+    Ok((StatusCode::CREATED, Json(json!({ "report_code": code }))).into_response())
+}
+
+fn internal() -> ApiError {
+    ApiError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "internal",
+        "Could not save the report.",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,8 +417,9 @@ mod tests {
     }
 
     fn job_with(name: &str) -> Job {
+        let dir = tempfile::tempdir().unwrap();
         let store = crate::jobs::JobStore::new(
-            std::path::PathBuf::from("."),
+            dir.path().to_path_buf(),
             std::sync::Arc::new(crate::clock::SystemClock),
         );
         let ip = "10.0.0.1".parse().unwrap();

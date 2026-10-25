@@ -299,6 +299,8 @@ mod tests {
             config: Arc::new(config),
             pairs: Arc::new(vec![(2026, 2024)]),
             clock,
+            reports: Arc::new(crate::reports::Reports::new(dir.path().join("reports"))),
+            engine_version: Arc::new("x".to_string()),
         };
         let req = NewJob {
             name: "a.rvt".into(),
