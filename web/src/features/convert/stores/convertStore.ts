@@ -50,7 +50,11 @@ export const useConvertStore = defineStore('convert', () => {
   const dropped = ref<DroppedElement[] | null>(null);
   const error = ref<ConvertError | null>(null);
   const reportCode = ref<string | null>(null);
+  /** Why the last report request failed: the ApiError code, or `network`. */
+  const reportError = ref<string | null>(null);
   const jobId = ref<string | null>(null);
+  /** Why the dropped list of a done job could not be loaded; `dropped` stays null then. */
+  const droppedError = ref<string | null>(null);
 
   const serverInfo = shallowRef<ServerInfo | null>(null);
   let loading: Promise<ServerInfo> | null = null;
@@ -60,6 +64,8 @@ export const useConvertStore = defineStore('convert', () => {
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let uploadAbort: AbortController | null = null;
   let uploadedThisSession = false;
+  // The tus URL of the current job, kept so an upload that gave up can be resumed with retryUpload().
+  let uploadUrl: string | null = null;
   const storage = safeStorage();
 
   function remember(id: string) {
@@ -107,6 +113,10 @@ export const useConvertStore = defineStore('convert', () => {
     phase.value = 'error';
   }
 
+  function codeOf(cause: unknown): string {
+    return cause instanceof ApiError ? cause.code : 'network';
+  }
+
   function failFrom(cause: unknown) {
     if (cause instanceof ApiError) {
       fail(cause.code, cause.message, cause.retryAfterS);
@@ -136,7 +146,10 @@ export const useConvertStore = defineStore('convert', () => {
     dropped.value = null;
     error.value = null;
     reportCode.value = null;
+    reportError.value = null;
+    droppedError.value = null;
     jobId.value = null;
+    uploadUrl = null;
   }
 
   function clearAll() {
@@ -168,8 +181,9 @@ export const useConvertStore = defineStore('convert', () => {
     if (phase.value !== 'pick' && phase.value !== 'ready' && phase.value !== 'error') {
       return;
     }
-    // A job left behind by an upload that gave up is abandoned with the new choice.
-    const abandoned = jobId.value;
+    // A job left behind by an upload that gave up is abandoned with the new choice. Any other retained job may still be
+    // running (for example after an unexpected polling error), so it is left alone and stays resumable.
+    const abandoned = phase.value === 'error' && error.value?.code === 'upload_failed' ? jobId.value : null;
     stop();
     const token = session;
     clearAll();
@@ -265,11 +279,11 @@ export const useConvertStore = defineStore('convert', () => {
           schedulePoll(token);
           return;
         }
-        // Resumed after a reload: the earlier page never finished the upload and the file is gone with it.
+        // Resumed while the upload is unfinished: the page that holds the file may be another tab still uploading, so the
+        // job is not deleted here; it is only forgotten, and the server expires it if nobody finishes the upload.
         forget();
         jobId.value = null;
         fail('upload_interrupted');
-        await deleteJob(id).catch(() => undefined);
         return;
       case 'queued':
       case 'running':
@@ -286,9 +300,13 @@ export const useConvertStore = defineStore('convert', () => {
           const list = await getDropped(id);
           if (token === session) {
             dropped.value = list;
+            droppedError.value = null;
           }
-        } catch {
-          // The list is a detail of the result; the download still works without it.
+        } catch (cause) {
+          // The download still works without the list; the view says the list could not be loaded.
+          if (token === session) {
+            droppedError.value = codeOf(cause);
+          }
         }
         return;
       case 'failed':
@@ -344,11 +362,18 @@ export const useConvertStore = defineStore('convert', () => {
       return;
     }
     jobId.value = created.jobId;
+    uploadUrl = created.uploadUrl;
     remember(created.jobId);
+    await runUpload(token, chosen, created.uploadUrl);
+  }
+
+  async function runUpload(token: number, chosen: File, url: string): Promise<void> {
+    phase.value = 'uploading';
+    error.value = null;
     const controller = new AbortController();
     uploadAbort = controller;
     try {
-      await uploadFile(chosen, created.uploadUrl, {
+      await uploadFile(chosen, url, {
         signal: controller.signal,
         onProgress: (sent, total) => {
           if (token === session) {
@@ -376,6 +401,17 @@ export const useConvertStore = defineStore('convert', () => {
     progress.value = 1;
     phase.value = 'queued';
     await poll(token);
+  }
+
+  /** Resumes an upload that gave up (`upload_failed`) for the same job; tus continues from the server's offset. */
+  async function retryUpload(): Promise<void> {
+    const chosen = file.value;
+    const url = uploadUrl;
+    if (phase.value !== 'error' || error.value?.code !== 'upload_failed' || !chosen || !jobId.value || !url) {
+      return;
+    }
+    stop();
+    await runUpload(session, chosen, url);
   }
 
   async function cancel(): Promise<void> {
@@ -420,13 +456,17 @@ export const useConvertStore = defineStore('convert', () => {
       return false;
     }
     const token = session;
+    reportError.value = null;
     try {
       const code = await sendReport(id);
       if (token === session) {
         reportCode.value = code;
       }
       return true;
-    } catch {
+    } catch (cause) {
+      if (token === session) {
+        reportError.value = codeOf(cause);
+      }
       return false;
     }
   }
@@ -467,11 +507,14 @@ export const useConvertStore = defineStore('convert', () => {
     dropped,
     error,
     reportCode,
+    reportError,
     jobId,
+    droppedError,
     load,
     chooseFile,
     setTarget,
     submit,
+    retryUpload,
     cancel,
     deleteNow,
     consentReport,
