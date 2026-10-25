@@ -15,6 +15,21 @@ export interface LocaleStorage {
   setItem: (key: string, value: string) => void;
 }
 
+/** `localStorage`, or an in-memory stand-in when the browser blocks it (reading the global itself can throw). */
+export function safeStorage(): LocaleStorage {
+  try {
+    return window.localStorage;
+  } catch {
+    const memory = new Map<string, string>();
+    return {
+      getItem: (key) => memory.get(key) ?? null,
+      setItem: (key, value) => {
+        memory.set(key, value);
+      },
+    };
+  }
+}
+
 function isLocale(value: string | null): value is AppLocale {
   return LOCALES.some((locale) => locale === value);
 }
@@ -42,9 +57,14 @@ export function createAppI18n(browserLanguage: string, storage: LocaleStorage) {
     fallbackLocale: 'en',
     messages: { en, vi },
   });
+  const reflectLocale = (locale: string) => {
+    document.documentElement.lang = locale;
+  };
+  reflectLocale(i18n.global.locale.value);
   watch(
     i18n.global.locale,
     (locale) => {
+      reflectLocale(locale);
       try {
         storage.setItem(LOCALE_STORAGE_KEY, locale);
       } catch {

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import en from '@/shared/locales/en.json';
 import vi from '@/shared/locales/vi.json';
 
-import { createAppI18n, pickLocale } from './i18n';
+import { createAppI18n, pickLocale, safeStorage } from './i18n';
 
 function keysOf(value: object, prefix = ''): string[] {
   return Object.entries(value).flatMap(([key, child]) =>
@@ -49,6 +49,40 @@ describe('createAppI18n', () => {
     const safe = createAppI18n('en-US', { getItem: blocked, setItem: blocked });
     safe.global.locale.value = 'vi';
     expect(safe.global.locale.value).toBe('vi');
+  });
+});
+
+describe('remembered locale', () => {
+  it('restores a remembered vi', () => {
+    const i18n = createAppI18n('en-US', { getItem: () => 'vi', setItem: () => undefined });
+    expect(i18n.global.locale.value).toBe('vi');
+  });
+
+  it('ignores an invalid stored value', () => {
+    const i18n = createAppI18n('en-US', { getItem: () => 'xx', setItem: () => undefined });
+    expect(i18n.global.locale.value).toBe('en');
+  });
+
+  it('sets the html lang to the active locale and follows changes', () => {
+    const i18n = createAppI18n('vi-VN', { getItem: () => null, setItem: () => undefined });
+    expect(document.documentElement.lang).toBe('vi');
+    i18n.global.locale.value = 'en';
+    expect(document.documentElement.lang).toBe('en');
+  });
+});
+
+describe('safeStorage', () => {
+  it('falls back to memory when reading localStorage throws', () => {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new Error('blocked');
+      },
+    });
+    const storage = safeStorage();
+    expect(storage.getItem('k')).toBeNull();
+    storage.setItem('k', 'v');
+    expect(storage.getItem('k')).toBe('v');
   });
 });
 

@@ -12,7 +12,7 @@
     "preview": "vite preview --port 4173 --strictPort",
     "type-check": "vue-tsc --build",
     "lint": "eslint .",
-    "format": "prettier --write src/ e2e/",
+    "format": "prettier --write src/ e2e/ *.ts *.json *.html",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },
