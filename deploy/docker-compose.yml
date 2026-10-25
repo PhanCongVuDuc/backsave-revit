@@ -8,6 +8,14 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     restart: unless-stopped
+    # Forwards stop signals to the server and reaps engine processes.
+    init: true
+    environment:
+      # Only Caddy can reach the server, so its X-Forwarded-For is trusted.
+      BACKSAVE_TRUST_PROXY: "true"
+      # Optional: honor the header only from these peers (IPs or CIDRs), e.g. the compose network.
+      # BACKSAVE_TRUSTED_PROXIES: "172.16.0.0/12"
+      # BACKSAVE_DISK_BUDGET_GIB: "100"
     volumes:
       - data:/data
       # To use the real conversion engine instead of the bundled stub, mount it read-only:

@@ -32,7 +32,7 @@ ENV BACKSAVE_ENGINE=/app/engine \
     BACKSAVE_DATA=/data \
     BACKSAVE_WEB_DIR=/app/web \
     BACKSAVE_LISTEN=0.0.0.0:8080 \
-    BACKSAVE_TRUST_PROXY=true
+    BACKSAVE_TRUST_PROXY=false
 
 USER backsave
 WORKDIR /app

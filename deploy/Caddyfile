@@ -1,5 +1,7 @@
-# Caddy appends the client address to X-Forwarded-For, which the server relies on
-# (BACKSAVE_TRUST_PROXY=true in the image) to apply its per-IP limits.
+# Caddy sets X-Forwarded-For to the address of the connecting client and drops any
+# value the client sent (unless `trusted_proxies` is configured here, which it is not).
+# The server takes the client address from that header for its per-IP limits
+# (BACKSAVE_TRUST_PROXY=true in docker-compose.yml).
 {$BACKSAVE_DOMAIN:localhost} {
 	encode gzip
 
