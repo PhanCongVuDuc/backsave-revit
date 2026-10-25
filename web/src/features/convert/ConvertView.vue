@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 
@@ -17,6 +17,7 @@ const store = useConvertStore();
 const route = useRoute();
 const router = useRouter();
 const sending = ref(false);
+const card = useTemplateRef<HTMLElement>('card');
 
 const summary = computed(() =>
   store.info && store.file
@@ -49,6 +50,16 @@ const targetModel = computed({
     store.setTarget(year);
   },
 });
+
+// After a step change the focused control is gone; move focus to the new step's first control.
+watch(
+  () => [store.phase, interrupted.value],
+  async () => {
+    await nextTick();
+    const target = card.value?.querySelector<HTMLElement>('button, a[href], select, input:not([hidden])');
+    (target ?? card.value)?.focus();
+  },
+);
 
 async function send() {
   sending.value = true;
@@ -105,7 +116,7 @@ onMounted(() => {
   <section class="convert">
     <h1>{{ t('convert.title') }}</h1>
     <p class="lead">{{ t('convert.lead') }}</p>
-    <div class="card">
+    <div ref="card" class="card" tabindex="-1">
       <AddFile v-if="store.phase === 'pick'" @file="store.chooseFile" />
       <FileSummary
         v-else-if="store.phase === 'ready' && store.file"
@@ -179,6 +190,10 @@ h1 {
   color: var(--color-text-muted);
   margin: 0 0 var(--space-6);
   text-align: center;
+}
+
+.card:focus {
+  outline: none;
 }
 
 .card {

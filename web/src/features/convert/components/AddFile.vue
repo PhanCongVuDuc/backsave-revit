@@ -1,11 +1,37 @@
 <script setup lang="ts">
-import { ref, useTemplateRef } from 'vue';
+import { onBeforeUnmount, onMounted, ref, useTemplateRef } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 const emit = defineEmits<{ file: [file: File] }>();
 const { t } = useI18n();
 const input = useTemplateRef<HTMLInputElement>('input');
 const over = ref(false);
+// dragenter/dragleave fire for every child element, so the zone counts how many it is inside.
+let depth = 0;
+
+// A file dropped just outside the zone would make the browser open it; only the zone takes drops.
+function ignoreStray(event: DragEvent) {
+  event.preventDefault();
+}
+
+onMounted(() => {
+  window.addEventListener('dragover', ignoreStray);
+  window.addEventListener('drop', ignoreStray);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('dragover', ignoreStray);
+  window.removeEventListener('drop', ignoreStray);
+});
+
+function enter() {
+  depth += 1;
+  over.value = true;
+}
+
+function leave() {
+  depth = Math.max(0, depth - 1);
+  over.value = depth > 0;
+}
 
 function choose(file: File | undefined) {
   if (file) {
@@ -21,6 +47,7 @@ function onChange(event: Event) {
 }
 
 function onDrop(event: DragEvent) {
+  depth = 0;
   over.value = false;
   choose(event.dataTransfer?.files[0]);
 }
@@ -31,8 +58,9 @@ function onDrop(event: DragEvent) {
     class="add-file"
     :class="{ 'is-over': over }"
     data-testid="drop-zone"
-    @dragover.prevent="over = true"
-    @dragleave="over = false"
+    @dragenter.prevent="enter"
+    @dragover.prevent
+    @dragleave="leave"
     @drop.prevent="onDrop"
   >
     <button type="button" class="plus" @click="input?.click()">

@@ -33,12 +33,12 @@ function downloadCsv() {
 
 <template>
   <section class="dropped">
-    <h3 class="title">
+    <h2 class="title">
       <span>{{ t('convert.dropped.title', { n: items.length }, items.length) }}</span>
       <template v-if="items.length > 0">
         <BaseButton variant="link" @click="downloadCsv">{{ t('convert.dropped.csv') }}</BaseButton>
       </template>
-    </h3>
+    </h2>
     <table v-if="items.length > 0">
       <thead>
         <tr>

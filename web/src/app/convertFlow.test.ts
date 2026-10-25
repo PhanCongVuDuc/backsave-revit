@@ -14,6 +14,7 @@ import App from '@/App.vue';
 import { createAppI18n } from '@/app/i18n';
 import { createAppRouter } from '@/app/router';
 import en from '@/features/convert/locales/en.json';
+import viConvert from '@/features/convert/locales/vi.json';
 import { basicFileInfo, fileOf, makeOle } from '@/shared/revit-file/makeOle.testutil';
 
 import { JOB_STORAGE_KEY, POLL_INTERVAL_MS } from '@/features/convert/stores/convertStore';
@@ -349,7 +350,7 @@ describe('shell', () => {
     expect(screen.getByRole('button', { name: 'EN' })).toHaveAttribute('aria-pressed', 'true');
     await user().click(screen.getByRole('button', { name: 'VI' }));
     expect(i18n.global.locale.value).toBe('vi');
-    expect(screen.getByRole('button', { name: 'Thêm file Revit' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: viConvert.convert.add.button })).toBeInTheDocument();
   });
 
   it('about_page_lists_the_deletion_times', async () => {
@@ -364,5 +365,27 @@ describe('shell', () => {
       'href',
       'https://github.com/PhanCongVuDuc/backsave-revit/blob/main/server/src/reports.rs',
     );
+  });
+});
+
+describe('keyboard and drag behaviour', () => {
+  it('moves focus into the card when the step changes', async () => {
+    await open();
+    await user().upload(screen.getByLabelText('Revit file'), revitFile());
+    await settle();
+    expect(screen.getByRole('combobox', { name: 'Target Revit version' })).toHaveFocus();
+  });
+
+  it('stops the browser opening a file dropped outside the zone, only while the zone is shown', async () => {
+    await open();
+    const stray = new Event('drop', { bubbles: true, cancelable: true });
+    document.body.dispatchEvent(stray);
+    expect(stray.defaultPrevented).toBe(true);
+
+    await user().upload(screen.getByLabelText('Revit file'), revitFile());
+    await settle();
+    const later = new Event('drop', { bubbles: true, cancelable: true });
+    document.body.dispatchEvent(later);
+    expect(later.defaultPrevented).toBe(false);
   });
 });

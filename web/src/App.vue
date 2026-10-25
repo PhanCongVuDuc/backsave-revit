@@ -80,8 +80,6 @@ const { t, locale } = useI18n();
 .languages {
   display: inline-flex;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  overflow: hidden;
 }
 
 .languages button {
@@ -92,6 +90,14 @@ const { t, locale } = useI18n();
   color: var(--color-text-muted);
   border: 0;
   cursor: pointer;
+}
+
+.languages button:first-child {
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.languages button:last-child {
+  border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 .languages button.is-on {
