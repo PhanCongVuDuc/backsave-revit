@@ -26,7 +26,10 @@ async fn downgrade_ok_returns_72_dropped_without_internal_fields() {
     let input = write_marker(dir.path(), "rvt", "ok", Some(2026));
     let req = request(dir.path(), input, Duration::from_secs(60));
     let out = req.output.clone();
-    let dropped = engine().downgrade(req, CancellationToken::new()).await.unwrap();
+    let dropped = engine()
+        .downgrade(req, CancellationToken::new())
+        .await
+        .unwrap();
     assert_eq!(dropped.len(), 72);
     assert!(out.exists());
     let json = serde_json::to_string(&dropped).unwrap();
@@ -43,7 +46,10 @@ async fn refused_carries_last_stderr_line() {
     let dir = tempfile::tempdir().unwrap();
     let input = write_marker(dir.path(), "rvt", "refuse", Some(2026));
     let err = engine()
-        .downgrade(request(dir.path(), input, Duration::from_secs(60)), CancellationToken::new())
+        .downgrade(
+            request(dir.path(), input, Duration::from_secs(60)),
+            CancellationToken::new(),
+        )
         .await
         .unwrap_err();
     match &err {
@@ -58,7 +64,10 @@ async fn corrupt_and_fail_map_to_kinds() {
     let dir = tempfile::tempdir().unwrap();
     let input = write_marker(dir.path(), "rvt", "corrupt", Some(2026));
     let err = engine()
-        .downgrade(request(dir.path(), input, Duration::from_secs(60)), CancellationToken::new())
+        .downgrade(
+            request(dir.path(), input, Duration::from_secs(60)),
+            CancellationToken::new(),
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, EngineError::Corrupt));
@@ -66,7 +75,10 @@ async fn corrupt_and_fail_map_to_kinds() {
 
     let input = write_marker(dir.path(), "rvt", "fail", Some(2026));
     let err = engine()
-        .downgrade(request(dir.path(), input, Duration::from_secs(60)), CancellationToken::new())
+        .downgrade(
+            request(dir.path(), input, Duration::from_secs(60)),
+            CancellationToken::new(),
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, EngineError::Failed));
@@ -80,16 +92,25 @@ async fn hang_is_killed_after_limit() {
     let started = Instant::now();
     let req = request(dir.path(), input, Duration::from_secs(1));
     let pid_file = dir.path().join("out.rvt.pid");
-    let err = engine().downgrade(req, CancellationToken::new()).await.unwrap_err();
+    let err = engine()
+        .downgrade(req, CancellationToken::new())
+        .await
+        .unwrap_err();
     assert!(matches!(err, EngineError::TimedOut), "{err:?}");
     let pid = wait_for_pid(&pid_file).await;
-    assert!(!process_alive(pid), "hung engine process {pid} is still running");
+    assert!(
+        !process_alive(pid),
+        "hung engine process {pid} is still running"
+    );
     assert_eq!(err.kind(), Some(ErrorKind::TimedOut));
     assert!(started.elapsed() < Duration::from_secs(5));
     // The adapter is reusable afterwards.
     let ok = write_marker(dir.path(), "rvt", "ok", Some(2026));
     engine()
-        .downgrade(request(dir.path(), ok, Duration::from_secs(60)), CancellationToken::new())
+        .downgrade(
+            request(dir.path(), ok, Duration::from_secs(60)),
+            CancellationToken::new(),
+        )
         .await
         .unwrap();
 }
@@ -113,7 +134,10 @@ async fn cancel_kills_running_child() {
         .unwrap_err();
     assert!(matches!(err, EngineError::Cancelled), "{err:?}");
     let pid = wait_for_pid(&pid_file).await;
-    assert!(!process_alive(pid), "cancelled engine process {pid} is still running");
+    assert!(
+        !process_alive(pid),
+        "cancelled engine process {pid} is still running"
+    );
     assert_eq!(err.kind(), None);
     assert!(started.elapsed() < Duration::from_secs(5));
 }
@@ -123,7 +147,10 @@ async fn crash_maps_to_crashed() {
     let dir = tempfile::tempdir().unwrap();
     let input = write_marker(dir.path(), "rvt", "crash", Some(2026));
     let err = engine()
-        .downgrade(request(dir.path(), input, Duration::from_secs(60)), CancellationToken::new())
+        .downgrade(
+            request(dir.path(), input, Duration::from_secs(60)),
+            CancellationToken::new(),
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, EngineError::Crashed), "{err:?}");
@@ -134,7 +161,10 @@ async fn crash_maps_to_crashed() {
 async fn probe_parses_json() {
     let dir = tempfile::tempdir().unwrap();
     let input = write_marker(dir.path(), "rfa", "ok", Some(2026));
-    let p = engine().probe(&input, CancellationToken::new()).await.unwrap();
+    let p = engine()
+        .probe(&input, CancellationToken::new())
+        .await
+        .unwrap();
     assert_eq!(p.kind, FileKind::Rfa);
     assert_eq!(p.year, 2026);
     assert_eq!(p.targets, vec![2025, 2024, 2023]);
@@ -151,7 +181,10 @@ async fn capabilities_parses_pairs() {
 #[tokio::test]
 async fn version_reads_first_line() {
     assert!(engine().version().await.starts_with("engine-stub "));
-    assert_eq!(Engine::new("/nonexistent/engine").version().await, "unknown");
+    assert_eq!(
+        Engine::new("/nonexistent/engine").version().await,
+        "unknown"
+    );
 }
 
 #[tokio::test]
@@ -186,7 +219,10 @@ async fn missing_log_after_success_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let input = write_marker(dir.path(), "rvt", "no-log", Some(2026));
     let err = engine()
-        .downgrade(request(dir.path(), input, Duration::from_secs(60)), CancellationToken::new())
+        .downgrade(
+            request(dir.path(), input, Duration::from_secs(60)),
+            CancellationToken::new(),
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, EngineError::Io(_)), "{err:?}");

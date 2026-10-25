@@ -100,7 +100,12 @@ pub struct ApiError {
 
 impl ApiError {
     pub fn new(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
-        Self { status, code, message: message.into(), retry_after_s: None }
+        Self {
+            status,
+            code,
+            message: message.into(),
+            retry_after_s: None,
+        }
     }
 
     pub fn retry_after(mut self, secs: u64) -> Self {
@@ -120,7 +125,8 @@ impl IntoResponse for ApiError {
         });
         let mut resp = (self.status, Json(body)).into_response();
         if let Some(s) = self.retry_after_s {
-            resp.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from(s));
+            resp.headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from(s));
         }
         resp
     }
@@ -149,8 +155,14 @@ mod tests {
 
     #[test]
     fn time_limit_rounds_mib_up() {
-        assert_eq!(time_limit(149 * MIB, 2), Duration::from_secs(300 + 4 * 149 * 2));
-        assert_eq!(time_limit(149 * MIB + 1, 2), Duration::from_secs(300 + 4 * 150 * 2));
+        assert_eq!(
+            time_limit(149 * MIB, 2),
+            Duration::from_secs(300 + 4 * 149 * 2)
+        );
+        assert_eq!(
+            time_limit(149 * MIB + 1, 2),
+            Duration::from_secs(300 + 4 * 150 * 2)
+        );
         assert_eq!(estimate(149 * MIB, 2), Duration::from_secs(298));
         assert_eq!(estimate(1, 1), Duration::from_secs(1));
     }
@@ -170,11 +182,25 @@ mod tests {
 
     #[test]
     fn enums_serialize_snake_case() {
-        assert_eq!(serde_json::to_string(&JobState::WaitingUpload).unwrap(), "\"waiting_upload\"");
-        assert_eq!(serde_json::to_string(&ErrorKind::TimedOut).unwrap(), "\"timed_out\"");
-        assert_eq!(serde_json::to_string(&DropReason::NoRule).unwrap(), "\"no_rule\"");
+        assert_eq!(
+            serde_json::to_string(&JobState::WaitingUpload).unwrap(),
+            "\"waiting_upload\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ErrorKind::TimedOut).unwrap(),
+            "\"timed_out\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DropReason::NoRule).unwrap(),
+            "\"no_rule\""
+        );
         assert_eq!(serde_json::to_string(&FileKind::Rvt).unwrap(), "\"rvt\"");
-        let d = DroppedElement { element_id: 7, class: "Wall".into(), reason: DropReason::Cascade, cascade_from: Some(3) };
+        let d = DroppedElement {
+            element_id: 7,
+            class: "Wall".into(),
+            reason: DropReason::Cascade,
+            cascade_from: Some(3),
+        };
         assert_eq!(
             serde_json::to_value(&d).unwrap(),
             serde_json::json!({"element_id":7,"class":"Wall","reason":"cascade","cascade_from":3})
@@ -183,12 +209,17 @@ mod tests {
 
     #[tokio::test]
     async fn api_error_json_shape() {
-        let r = ApiError::new(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "Slow down").retry_after(42).into_response();
+        let r = ApiError::new(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "Slow down")
+            .retry_after(42)
+            .into_response();
         assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(r.headers()["retry-after"], "42");
         let body = axum::body::to_bytes(r.into_body(), 4096).await.unwrap();
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(v, serde_json::json!({"error":{"code":"rate_limited","message":"Slow down","retry_after_s":42}}));
+        assert_eq!(
+            v,
+            serde_json::json!({"error":{"code":"rate_limited","message":"Slow down","retry_after_s":42}})
+        );
 
         let r = ApiError::new(StatusCode::NOT_FOUND, "not_found", "x").into_response();
         assert!(r.headers().get("retry-after").is_none());

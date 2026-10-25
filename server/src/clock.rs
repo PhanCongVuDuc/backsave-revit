@@ -23,7 +23,9 @@ pub struct ManualClock {
 
 impl ManualClock {
     pub fn new(start: DateTime<Utc>) -> Self {
-        Self { now: Mutex::new(start) }
+        Self {
+            now: Mutex::new(start),
+        }
     }
 
     pub fn advance(&self, d: Duration) {

@@ -28,7 +28,9 @@ impl Config {
         let non_empty = |k: &str| get(k).filter(|v| !v.is_empty());
         let engine = non_empty("BACKSAVE_ENGINE").context("BACKSAVE_ENGINE is required")?;
         let workers = match non_empty("BACKSAVE_WORKERS") {
-            Some(v) => v.parse::<usize>().context("BACKSAVE_WORKERS must be a number")?,
+            Some(v) => v
+                .parse::<usize>()
+                .context("BACKSAVE_WORKERS must be a number")?,
             None => 1,
         };
         if workers == 0 {
@@ -69,7 +71,8 @@ mod tests {
 
     #[test]
     fn config_defaults() {
-        let c = Config::from_lookup(lookup(HashMap::from([("BACKSAVE_ENGINE", "/bin/eng")]))).unwrap();
+        let c =
+            Config::from_lookup(lookup(HashMap::from([("BACKSAVE_ENGINE", "/bin/eng")]))).unwrap();
         assert_eq!(c.engine, PathBuf::from("/bin/eng"));
         assert_eq!(c.data, PathBuf::from("./data"));
         assert_eq!(c.workers, 1);

@@ -13,13 +13,11 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
-
 const MAX_JOBS_PER_HOUR: usize = 5;
 const MAX_WAITING_UPLOADS: usize = 2;
 const MAX_QUEUED: usize = 20;
 const DONE_RETENTION_MIN: i64 = 60;
 const FAILED_RETENTION_MIN: i64 = 15;
-
 
 /// A 128-bit random identifier rendered as 32 lowercase hex characters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -61,7 +59,8 @@ impl FromStr for JobId {
         };
         let mut out = [0u8; 16];
         for (i, o) in out.iter_mut().enumerate() {
-            *o = digit(bytes[2 * i]).ok_or(ParseJobIdError)? << 4 | digit(bytes[2 * i + 1]).ok_or(ParseJobIdError)?;
+            *o = digit(bytes[2 * i]).ok_or(ParseJobIdError)? << 4
+                | digit(bytes[2 * i + 1]).ok_or(ParseJobIdError)?;
         }
         Ok(JobId(out))
     }
@@ -126,7 +125,12 @@ fn api(status: StatusCode, code: &'static str, msg: &str) -> ApiError {
 
 impl JobStore {
     pub fn new(data_dir: PathBuf, clock: Arc<dyn Clock>) -> JobStore {
-        JobStore { data_dir, clock, inner: Mutex::new(Inner::default()), notify: Notify::new() }
+        JobStore {
+            data_dir,
+            clock,
+            inner: Mutex::new(Inner::default()),
+            notify: Notify::new(),
+        }
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -151,7 +155,11 @@ impl JobStore {
 
     pub fn create(&self, req: NewJob, ip: IpAddr, pairs: &[(u16, u16)]) -> Result<Job, ApiError> {
         if req.size > MAX_BYTES {
-            return Err(api(StatusCode::PAYLOAD_TOO_LARGE, "too_large", "The file is larger than 1 GiB."));
+            return Err(api(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "too_large",
+                "The file is larger than 1 GiB.",
+            ));
         }
         if FileKind::from_name(&req.name) != Some(req.kind) {
             return Err(api(
@@ -180,22 +188,46 @@ impl JobStore {
             let oldest = *hist.front().expect("non-empty history");
             let ms = (oldest + window - now).num_milliseconds().max(0) as u64;
             let secs = ms.div_ceil(1000).max(1);
-            return Err(api(StatusCode::TOO_MANY_REQUESTS, "hourly_limit", "Hourly limit reached. Try again later.")
-                .retry_after(secs));
+            return Err(api(
+                StatusCode::TOO_MANY_REQUESTS,
+                "hourly_limit",
+                "Hourly limit reached. Try again later.",
+            )
+            .retry_after(secs));
         }
 
-        let count = |g: &Inner, f: &dyn Fn(&Job) -> bool| g.jobs.values().filter(|j| j.ip == ip && f(j)).count();
-        if count(&g, &|j| matches!(j.state, JobState::Queued | JobState::Running)) >= 1 {
-            return Err(api(StatusCode::TOO_MANY_REQUESTS, "active_job", "You already have a conversion in progress."));
+        let count = |g: &Inner, f: &dyn Fn(&Job) -> bool| {
+            g.jobs.values().filter(|j| j.ip == ip && f(j)).count()
+        };
+        if count(&g, &|j| {
+            matches!(j.state, JobState::Queued | JobState::Running)
+        }) >= 1
+        {
+            return Err(api(
+                StatusCode::TOO_MANY_REQUESTS,
+                "active_job",
+                "You already have a conversion in progress.",
+            ));
         }
         if count(&g, &|j| j.state == JobState::WaitingUpload) >= MAX_WAITING_UPLOADS {
-            return Err(api(StatusCode::TOO_MANY_REQUESTS, "uploads_in_progress", "Too many uploads in progress."));
+            return Err(api(
+                StatusCode::TOO_MANY_REQUESTS,
+                "uploads_in_progress",
+                "Too many uploads in progress.",
+            ));
         }
-        if g.jobs.values().filter(|j| j.state == JobState::Queued).count() >= MAX_QUEUED {
-            return Err(
-                api(StatusCode::SERVICE_UNAVAILABLE, "queue_full", "The queue is full. Try again shortly.")
-                    .retry_after(60),
-            );
+        if g.jobs
+            .values()
+            .filter(|j| j.state == JobState::Queued)
+            .count()
+            >= MAX_QUEUED
+        {
+            return Err(api(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "queue_full",
+                "The queue is full. Try again shortly.",
+            )
+            .retry_after(60));
         }
 
         let id = JobId::random();
@@ -221,7 +253,11 @@ impl JobStore {
             seq,
         };
         if std::fs::create_dir_all(self.job_dir(&job)).is_err() {
-            return Err(api(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Could not prepare the job."));
+            return Err(api(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal",
+                "Could not prepare the job.",
+            ));
         }
         g.next_seq += 1;
         g.history.entry(ip).or_default().push_back(now);
@@ -349,7 +385,10 @@ impl JobStore {
         let now = self.clock.now();
         if let Some(j) = self.lock().jobs.get_mut(id) {
             j.cancel.cancel();
-            if matches!(j.state, JobState::WaitingUpload | JobState::Queued | JobState::Running) {
+            if matches!(
+                j.state,
+                JobState::WaitingUpload | JobState::Queued | JobState::Running
+            ) {
                 j.state = JobState::Cancelled;
                 j.finished_at = Some(now);
             }
@@ -385,13 +424,21 @@ mod tests {
 
     fn setup() -> (JobStore, Arc<ManualClock>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let clock = Arc::new(ManualClock::new(chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap()));
+        let clock = Arc::new(ManualClock::new(
+            chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap(),
+        ));
         let store = JobStore::new(dir.path().to_path_buf(), clock.clone());
         (store, clock, dir)
     }
 
     fn req() -> NewJob {
-        NewJob { name: "House.rvt".into(), size: 1000, kind: FileKind::Rvt, year: 2026, target: 2024 }
+        NewJob {
+            name: "House.rvt".into(),
+            size: 1000,
+            kind: FileKind::Rvt,
+            year: 2026,
+            target: 2024,
+        }
     }
 
     fn ip(n: u8) -> IpAddr {
@@ -434,7 +481,10 @@ mod tests {
         let (s, _c, _d) = setup();
         let mut r = req();
         r.size = GIB + 1;
-        assert_eq!(err_of(s.create(r, ip(1), &pairs())), (StatusCode::PAYLOAD_TOO_LARGE, "too_large", None));
+        assert_eq!(
+            err_of(s.create(r, ip(1), &pairs())),
+            (StatusCode::PAYLOAD_TOO_LARGE, "too_large", None)
+        );
         let mut r = req();
         r.size = GIB;
         assert!(s.create(r, ip(1), &pairs()).is_ok());
@@ -445,7 +495,10 @@ mod tests {
         let (s, _c, _d) = setup();
         let mut r = req();
         r.kind = FileKind::Rfa;
-        assert_eq!(err_of(s.create(r, ip(1), &pairs())), (StatusCode::UNPROCESSABLE_ENTITY, "bad_kind", None));
+        assert_eq!(
+            err_of(s.create(r, ip(1), &pairs())),
+            (StatusCode::UNPROCESSABLE_ENTITY, "bad_kind", None)
+        );
         let mut r = req();
         r.name = "notes.txt".into();
         assert_eq!(err_of(s.create(r, ip(1), &pairs())).1, "bad_kind");
@@ -576,7 +629,10 @@ mod tests {
             let j = s.create(req(), ip(1), &pairs()).unwrap();
             s.cancel(&j.id);
         }
-        assert_eq!(err_of(s.create(req(), ip(1), &pairs())), (StatusCode::TOO_MANY_REQUESTS, "hourly_limit", Some(3600)));
+        assert_eq!(
+            err_of(s.create(req(), ip(1), &pairs())),
+            (StatusCode::TOO_MANY_REQUESTS, "hourly_limit", Some(3600))
+        );
         c.advance(Duration::from_secs(3600));
         assert!(s.create(req(), ip(1), &pairs()).is_ok());
     }
@@ -590,7 +646,12 @@ mod tests {
         s.take_next().unwrap();
         assert_eq!(s.get(&a.id).unwrap().started_at, Some(t0));
         c.advance(Duration::from_secs(10));
-        let d = DroppedElement { element_id: 1, class: "Wall".into(), reason: crate::model::DropReason::NoRule, cascade_from: None };
+        let d = DroppedElement {
+            element_id: 1,
+            class: "Wall".into(),
+            reason: crate::model::DropReason::NoRule,
+            cascade_from: None,
+        };
         s.finish(&a.id, Ok(vec![d.clone()]));
         let j = s.get(&a.id).unwrap();
         assert_eq!(j.state, JobState::Done);
@@ -643,7 +704,10 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(!h.is_finished());
         s.mark_uploaded(&a.id);
-        let got = tokio::time::timeout(Duration::from_secs(2), h).await.unwrap().unwrap();
+        let got = tokio::time::timeout(Duration::from_secs(2), h)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(got.id, a.id);
         assert_eq!(got.state, JobState::Running);
     }
@@ -653,7 +717,9 @@ mod tests {
         let (s, _c, _d) = setup();
         let a = s.create(req(), ip(1), &pairs()).unwrap();
         s.mark_uploaded(&a.id);
-        let got = tokio::time::timeout(Duration::from_secs(2), s.next_job()).await.unwrap();
+        let got = tokio::time::timeout(Duration::from_secs(2), s.next_job())
+            .await
+            .unwrap();
         assert_eq!(got.id, a.id);
     }
 }

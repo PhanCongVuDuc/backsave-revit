@@ -16,7 +16,11 @@ pub fn stub_path() -> PathBuf {
             .status()
             .expect("run cargo build");
         assert!(status.success(), "building engine-stub failed");
-        let exe = if cfg!(windows) { "engine-stub.exe" } else { "engine-stub" };
+        let exe = if cfg!(windows) {
+            "engine-stub.exe"
+        } else {
+            "engine-stub"
+        };
         let target = std::env::var_os("CARGO_TARGET_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| workspace.join("target"));
@@ -32,7 +36,11 @@ pub fn stub_path() -> PathBuf {
 pub fn write_marker(dir: &Path, ext: &str, mode: &str, year: Option<u32>) -> PathBuf {
     let mut bytes = format!("stub-mode={mode}\n").into_bytes();
     if let Some(y) = year {
-        bytes.extend(format!("Format: {y}").encode_utf16().flat_map(|u| u.to_le_bytes()));
+        bytes.extend(
+            format!("Format: {y}")
+                .encode_utf16()
+                .flat_map(|u| u.to_le_bytes()),
+        );
     }
     let p = dir.join(format!("in.{ext}"));
     std::fs::write(&p, bytes).unwrap();
@@ -68,5 +76,34 @@ pub fn process_alive(pid: u32) -> bool {
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
+    }
+}
+
+/// Application state for route tests: stub engine, every 2023-2027 pair, default limits, data under `data_dir`.
+pub fn test_state(
+    data_dir: &Path,
+    clock: std::sync::Arc<backsave_server::clock::ManualClock>,
+) -> backsave_server::AppState {
+    use backsave_server::{AppState, config::Config, engine::Engine, jobs::JobStore};
+    use std::sync::Arc;
+    let engine = stub_path();
+    let config = Config::from_lookup(|k| match k {
+        "BACKSAVE_ENGINE" => Some(engine.to_string_lossy().into_owned()),
+        "BACKSAVE_DATA" => Some(data_dir.to_string_lossy().into_owned()),
+        _ => None,
+    })
+    .expect("test config");
+    let mut pairs = Vec::new();
+    for from in 2023..=2027u16 {
+        for to in 2023..from {
+            pairs.push((from, to));
+        }
+    }
+    AppState {
+        store: Arc::new(JobStore::new(data_dir.to_path_buf(), clock.clone())),
+        engine: Arc::new(Engine::new(engine)),
+        config: Arc::new(config),
+        pairs: Arc::new(pairs),
+        clock,
     }
 }

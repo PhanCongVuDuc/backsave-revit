@@ -1,8 +1,9 @@
 pub mod clock;
 pub mod config;
-pub mod model;
 pub mod engine;
 pub mod jobs;
+pub mod model;
+pub mod upload;
 
 use std::sync::Arc;
 

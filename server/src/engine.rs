@@ -93,8 +93,16 @@ impl Engine {
         Self::with_limits(path, Duration::from_secs(60), Duration::from_secs(30))
     }
 
-    pub fn with_limits(path: impl Into<PathBuf>, probe_limit: Duration, query_limit: Duration) -> Self {
-        Self { path: path.into(), probe_limit, query_limit }
+    pub fn with_limits(
+        path: impl Into<PathBuf>,
+        probe_limit: Duration,
+        query_limit: Duration,
+    ) -> Self {
+        Self {
+            path: path.into(),
+            probe_limit,
+            query_limit,
+        }
     }
 
     /// First line of `--version`, or `"unknown"` on any failure.
@@ -125,7 +133,11 @@ impl Engine {
         Ok(parse_json::<Caps>(&c.stdout)?.pairs)
     }
 
-    pub async fn probe(&self, file: &Path, cancel: CancellationToken) -> Result<Probe, EngineError> {
+    pub async fn probe(
+        &self,
+        file: &Path,
+        cancel: CancellationToken,
+    ) -> Result<Probe, EngineError> {
         let mut cmd = Command::new(&self.path);
         cmd.arg("probe").arg(file).arg("--json");
         let c = capture(cmd, Some(self.probe_limit), Some(cancel)).await?;
@@ -171,7 +183,12 @@ fn check_status(c: &Captured) -> Result<(), EngineError> {
 
 fn last_line(stderr: &[u8]) -> String {
     let text = String::from_utf8_lossy(stderr);
-    let line = text.lines().rev().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let line = text
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
     line.chars().take(MAX_MESSAGE_CHARS).collect()
 }
 

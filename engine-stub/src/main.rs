@@ -90,7 +90,10 @@ fn content_year(bytes: &[u8]) -> Option<u32> {
 fn content_mode(bytes: &[u8]) -> Option<&'static str> {
     let pos = find(bytes, b"stub-mode=")? + b"stub-mode=".len();
     let rest = &bytes[pos..];
-    MODES.iter().copied().find(|m| rest.starts_with(m.as_bytes()))
+    MODES
+        .iter()
+        .copied()
+        .find(|m| rest.starts_with(m.as_bytes()))
 }
 
 fn name_year(name: &str) -> Option<u32> {
@@ -98,7 +101,11 @@ fn name_year(name: &str) -> Option<u32> {
 }
 
 fn name_mode(name: &str) -> Option<&'static str> {
-    MODES.iter().copied().filter(|m| *m != "ok").find(|m| name.contains(m))
+    MODES
+        .iter()
+        .copied()
+        .filter(|m| *m != "ok")
+        .find(|m| name.contains(m))
 }
 
 struct Selection {
@@ -116,7 +123,9 @@ fn select(path: &Path, bytes: &[u8]) -> Selection {
         MODES.iter().copied().find(|m| *m == v)
     });
     Selection {
-        year: content_year(bytes).or_else(|| name_year(&name)).unwrap_or(2026),
+        year: content_year(bytes)
+            .or_else(|| name_year(&name))
+            .unwrap_or(2026),
         mode: content_mode(bytes)
             .or_else(|| name_mode(&name))
             .or(env_mode)
@@ -171,7 +180,10 @@ fn probe(file: &Path) {
         hang_forever();
     }
     check_year(sel.year);
-    println!("{}", json!({"kind": kind, "year": sel.year, "targets": targets(sel.year)}));
+    println!(
+        "{}",
+        json!({"kind": kind, "year": sel.year, "targets": targets(sel.year)})
+    );
 }
 
 fn write_log(log: &Path, kind: &str, year: u32, to: u32) -> std::io::Result<()> {
@@ -182,22 +194,30 @@ fn write_log(log: &Path, kind: &str, year: u32, to: u32) -> std::io::Result<()> 
     line(json!({"type":"run","engine":"engine-stub","kind":kind,"from":year,"to":to}));
     let mut id = 1000u64;
     for _ in 0..61 {
-        line(json!({"type":"element_dropped","id":id,"class":"CustomElement","reason":"no_rule",
-            "cascade_from":null,"rule":null,"method_doc":"stub/custom-element.md","step":3}));
+        line(
+            json!({"type":"element_dropped","id":id,"class":"CustomElement","reason":"no_rule",
+            "cascade_from":null,"rule":null,"method_doc":"stub/custom-element.md","step":3}),
+        );
         id += 1;
     }
     for _ in 0..2 {
-        line(json!({"type":"element_dropped","id":id,"class":"MEPSystemZoneElementType","reason":"no_rule",
-            "cascade_from":null,"rule":null,"method_doc":"stub/mep-zone-type.md","step":5}));
+        line(
+            json!({"type":"element_dropped","id":id,"class":"MEPSystemZoneElementType","reason":"no_rule",
+            "cascade_from":null,"rule":null,"method_doc":"stub/mep-zone-type.md","step":5}),
+        );
         id += 1;
     }
     for _ in 0..9 {
-        line(json!({"type":"element_dropped","id":id,"class":"ElementHeader","reason":"cascade",
-            "cascade_from":1000,"rule":"R-cascade-header","method_doc":"stub/cascade.md","step":7}));
+        line(
+            json!({"type":"element_dropped","id":id,"class":"ElementHeader","reason":"cascade",
+            "cascade_from":1000,"rule":"R-cascade-header","method_doc":"stub/cascade.md","step":7}),
+        );
         id += 1;
     }
-    line(json!({"type":"field_dropped","class":"Wall","field":"StubField","rule":"R-field-1",
-        "method_doc":"stub/field.md","step":4}));
+    line(
+        json!({"type":"field_dropped","class":"Wall","field":"StubField","rule":"R-field-1",
+        "method_doc":"stub/field.md","step":4}),
+    );
     line(json!({"type":"summary","elements_dropped":72,"fields_dropped":1,"steps":year - to}));
     std::fs::write(log, s)
 }
@@ -222,7 +242,10 @@ fn downgrade(input: &Path, to: u32, out: &Path, log: &Path) {
     }
     check_year(sel.year);
     if !targets(sel.year).contains(&to) {
-        fail(3, &format!("Cannot convert a Revit {} file to {to}", sel.year));
+        fail(
+            3,
+            &format!("Cannot convert a Revit {} file to {to}", sel.year),
+        );
     }
     let write_log_file = sel.mode != "no-log";
     if std::fs::write(out, &bytes).is_err()
@@ -251,7 +274,12 @@ fn main() {
             println!("{}", json!({"pairs": pairs}));
         }
         Some(Cmd::Probe { file, .. }) => probe(&file),
-        Some(Cmd::Downgrade { input, to, out, log }) => downgrade(&input, to, &out, &log),
+        Some(Cmd::Downgrade {
+            input,
+            to,
+            out,
+            log,
+        }) => downgrade(&input, to, &out, &log),
         None => fail(2, "missing subcommand"),
     }
 }
