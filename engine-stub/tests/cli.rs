@@ -137,3 +137,27 @@ fn content_marker_overrides_name() {
         .assert()
         .code(3);
 }
+
+#[test]
+fn name_token_not_shadowed_by_ok() {
+    let (a, out, _d) = run_mode("broken_fail.rvt");
+    a.code(5);
+    assert!(!out.exists());
+}
+
+#[test]
+fn env_mode_used_when_name_has_no_token() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("look.rvt");
+    fs::write(&input, b"x").unwrap();
+    stub()
+        .env("BACKSAVE_STUB_MODE", "corrupt")
+        .arg("downgrade")
+        .arg(&input)
+        .args(["--to", "2024", "--out"])
+        .arg(dir.path().join("o.rvt"))
+        .arg("--log")
+        .arg(dir.path().join("l.jsonl"))
+        .assert()
+        .code(4);
+}

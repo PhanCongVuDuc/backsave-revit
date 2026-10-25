@@ -89,7 +89,7 @@ fn name_year(name: &str) -> Option<u32> {
 }
 
 fn name_mode(name: &str) -> Option<&'static str> {
-    MODES.iter().copied().find(|m| name.contains(m))
+    MODES.iter().copied().filter(|m| *m != "ok").find(|m| name.contains(m))
 }
 
 struct Selection {
@@ -199,6 +199,7 @@ fn downgrade(input: &Path, to: u32, out: &Path, log: &Path) {
     }
     if std::fs::write(out, &bytes).is_err() || write_log(log, kind, sel.year, to).is_err() {
         let _ = std::fs::remove_file(out);
+        let _ = std::fs::remove_file(log);
         fail(5, "Could not write the output");
     }
 }
