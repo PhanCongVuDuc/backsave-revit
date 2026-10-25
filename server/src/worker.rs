@@ -34,30 +34,38 @@ pub fn spawn_workers(n: usize, store: Arc<JobStore>, engine: Arc<Engine>) -> Vec
 }
 
 async fn run_job(store: Arc<JobStore>, engine: Arc<Engine>, job: Job) {
+    run_job_inner(&store, &engine, &job).await;
+    // A job cancelled while running is removed here, once the engine has released its files,
+    // whatever the engine reported.
     if job.cancel.is_cancelled() {
         store.remove(&job.id);
+    }
+}
+
+async fn run_job_inner(store: &JobStore, engine: &Engine, job: &Job) {
+    if job.cancel.is_cancelled() {
         return;
     }
-    let input = store.input_path(&job);
-    let output = store.output_path(&job);
-    let log = store.log_path(&job);
+    let input = store.input_path(job);
+    let output = store.output_path(job);
+    let log = store.log_path(job);
 
     let probe = match engine.probe(&input, job.cancel.clone()).await {
         Ok(p) => p,
-        Err(e) => return finish_error(&store, &job, e),
+        Err(e) => return finish_error(store, job, e),
     };
     if probe.kind != job.kind || probe.year != job.year {
         return fail(
-            &store,
-            &job,
+            store,
+            job,
             ErrorKind::Mismatch,
             "The file is not what the browser reported.".into(),
         );
     }
     if !probe.targets.contains(&job.target) {
         return fail(
-            &store,
-            &job,
+            store,
+            job,
             ErrorKind::Refused,
             "This conversion is not supported for this file.".into(),
         );
@@ -76,7 +84,7 @@ async fn run_job(store: Arc<JobStore>, engine: Arc<Engine>, job: Job) {
             store.finish(&job.id, Ok(dropped));
         }
         Err(e) => {
-            finish_error(&store, &job, e);
+            finish_error(store, job, e);
         }
     }
 }

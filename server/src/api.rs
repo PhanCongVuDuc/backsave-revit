@@ -1,7 +1,7 @@
 //! JSON API under `/api`: server info, job creation, status, downloads and deletion.
 
 use crate::AppState;
-use crate::jobs::{Job, JobId, NewJob};
+use crate::jobs::{CancelOutcome, Job, JobId, NewJob};
 use crate::model::{ApiError, DroppedElement, ErrorKind, FileKind, JobState, estimate};
 use axum::Json;
 use axum::Router;
@@ -18,6 +18,7 @@ use std::net::{IpAddr, SocketAddr};
 use tokio_util::io::ReaderStream;
 
 const MAX_NAME_CHARS: usize = 255;
+const NO_STORE: &str = "no-store";
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -158,7 +159,7 @@ struct JobOut {
 async fn get_job(
     State(s): State<AppState>,
     Path(raw): Path<String>,
-) -> Result<Json<JobOut>, ApiError> {
+) -> Result<impl IntoResponse, ApiError> {
     let job = load_job(&s, &raw)?;
     if job.state == JobState::Expired {
         return Err(expired());
@@ -185,30 +186,36 @@ async fn get_job(
     } else {
         None
     };
-    Ok(Json(JobOut {
-        state: job.state,
-        position,
-        elapsed_s,
-        estimate_s: estimate(job.size, steps).as_secs(),
-        expires_at: job
-            .expires_at
-            .map(|t| t.to_rfc3339_opts(SecondsFormat::Secs, true)),
-        error: job.error.map(|e| ErrorOut {
-            kind: e.kind,
-            message: e.message,
+    Ok((
+        [(header::CACHE_CONTROL, NO_STORE)],
+        Json(JobOut {
+            state: job.state,
+            position,
+            elapsed_s,
+            estimate_s: estimate(job.size, steps).as_secs(),
+            expires_at: job
+                .expires_at
+                .map(|t| t.to_rfc3339_opts(SecondsFormat::Secs, true)),
+            error: job.error.map(|e| ErrorOut {
+                kind: e.kind,
+                message: e.message,
+            }),
+            result,
+            report_code: job.report_code,
         }),
-        result,
-        report_code: job.report_code,
-    }))
+    ))
 }
 
 /// `<stem>_R<target>.<ext>` where stem is the original name without its last extension.
 fn download_name(job: &Job) -> String {
-    let (stem, ext) = match job.name.rsplit_once('.') {
-        Some((stem, ext)) if !stem.is_empty() => (stem, ext),
-        _ => (job.name.as_str(), job.kind.ext()),
+    // Keep the user's extension only when it is the job kind's own; otherwise append it.
+    let stem = match job.name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && ext.eq_ignore_ascii_case(job.kind.ext()) => {
+            return format!("{stem}_R{}.{ext}", job.target);
+        }
+        _ => job.name.as_str(),
     };
-    format!("{stem}_R{}.{ext}", job.target)
+    format!("{stem}_R{}.{}", job.target, job.kind.ext())
 }
 
 fn ascii_fallback(name: &str) -> String {
@@ -274,6 +281,11 @@ async fn download_file(
         HeaderValue::from_static("application/octet-stream"),
     );
     h.insert(header::CONTENT_LENGTH, HeaderValue::from(len));
+    h.insert(header::CACHE_CONTROL, HeaderValue::from_static(NO_STORE));
+    h.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
     h.insert(
         header::CONTENT_DISPOSITION,
         HeaderValue::from_str(&content_disposition(&download_name(&job)))
@@ -285,19 +297,22 @@ async fn download_file(
 async fn dropped(
     State(s): State<AppState>,
     Path(raw): Path<String>,
-) -> Result<Json<Vec<DroppedElement>>, ApiError> {
-    Ok(Json(done_job(&s, &raw)?.dropped))
+) -> Result<impl IntoResponse, ApiError> {
+    let dropped: Vec<DroppedElement> = done_job(&s, &raw)?.dropped;
+    Ok(([(header::CACHE_CONTROL, NO_STORE)], Json(dropped)))
 }
 
 async fn delete_job(
     State(s): State<AppState>,
     Path(raw): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let job = load_job(&s, &raw)?;
-    s.store.cancel(&job.id);
-    // A running job is removed by its worker once the engine has let go of the files.
-    if job.state != JobState::Running {
-        s.store.remove(&job.id);
+    let id: JobId = raw.parse().map_err(|_| not_found())?;
+    // The decision is made atomically by the store; a running job is removed by its worker
+    // once the engine has let go of the files.
+    match s.store.cancel(&id) {
+        CancelOutcome::NotFound => return Err(not_found()),
+        CancelOutcome::WasRunning => {}
+        CancelOutcome::Other => s.store.remove(&id),
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -340,11 +355,39 @@ mod tests {
         );
     }
 
+    fn job_with(name: &str) -> Job {
+        let store = crate::jobs::JobStore::new(
+            std::path::PathBuf::from("."),
+            std::sync::Arc::new(crate::clock::SystemClock),
+        );
+        let ip = "10.0.0.1".parse().unwrap();
+        let new = NewJob {
+            name: "x.rvt".into(),
+            size: 10,
+            kind: FileKind::Rvt,
+            year: 2026,
+            target: 2025,
+        };
+        let mut job = store.create(new, ip, &[(2026, 2025)]).unwrap();
+        job.name = name.into();
+        job
+    }
+
+    #[test]
+    fn download_name_keeps_only_matching_extension() {
+        assert_eq!(download_name(&job_with("House.rvt")), "House_R2025.rvt");
+        assert_eq!(download_name(&job_with("House.RVT")), "House_R2025.RVT");
+        assert_eq!(
+            download_name(&job_with("my.project.v2")),
+            "my.project.v2_R2025.rvt"
+        );
+    }
+
     #[test]
     fn content_disposition_encodes_unicode_name() {
         assert_eq!(
-            content_disposition("Dự án \"cuối\" (v2)_R2025.rvt"),
-            "attachment; filename=\"D_ _n _cu_i_ (v2)_R2025.rvt\"; filename*=UTF-8''D%E1%BB%B1%20%C3%A1n%20%22cu%E1%BB%91i%22%20%28v2%29_R2025.rvt"
+            content_disposition("Grüße \"naïve\" (v2)_R2025.rvt"),
+            "attachment; filename=\"Gr__e _na_ve_ (v2)_R2025.rvt\"; filename*=UTF-8''Gr%C3%BC%C3%9Fe%20%22na%C3%AFve%22%20%28v2%29_R2025.rvt"
         );
     }
 }

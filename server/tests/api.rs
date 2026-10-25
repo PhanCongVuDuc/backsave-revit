@@ -185,6 +185,8 @@ async fn create_upload_run_download_flow() {
         .unwrap()
         .parse()
         .unwrap();
+    assert_eq!(resp.headers()["cache-control"], "no-store");
+    assert_eq!(resp.headers()["x-content-type-options"], "nosniff");
     let bytes = body_bytes(resp).await;
     assert_eq!(bytes.len(), len);
     assert_eq!(bytes, data);
@@ -192,6 +194,7 @@ async fn create_upload_run_download_flow() {
 
     let resp = send(&f, get(&format!("/api/jobs/{id}/dropped"))).await;
     assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.headers()["cache-control"], "no-store");
     let list = body_json(resp).await;
     let list = list.as_array().unwrap();
     assert_eq!(list.len(), 72);
@@ -207,12 +210,12 @@ async fn download_keeps_unicode_name() {
     let f = setup();
     start_workers(&f);
     let data = marker_bytes("ok", 2026);
-    let id = run_to_done(&f, "Dự án \"cuối\" (v2).rvt", &data, 2026, 2025).await;
+    let id = run_to_done(&f, "Grüße \"naïve\" (v2).rvt", &data, 2026, 2025).await;
     let resp = send(&f, get(&format!("/api/jobs/{id}/file"))).await;
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(
         resp.headers()["content-disposition"],
-        "attachment; filename=\"D_ _n _cu_i_ (v2)_R2025.rvt\"; filename*=UTF-8''D%E1%BB%B1%20%C3%A1n%20%22cu%E1%BB%91i%22%20%28v2%29_R2025.rvt"
+        "attachment; filename=\"Gr__e _na_ve_ (v2)_R2025.rvt\"; filename*=UTF-8''Gr%C3%BC%C3%9Fe%20%22na%C3%AFve%22%20%28v2%29_R2025.rvt"
     );
 }
 
@@ -367,7 +370,9 @@ async fn job_json_has_no_internal_fields() {
     start_workers(&f);
     let data = marker_bytes("ok", 2026);
     let id = run_to_done(&f, "House.rvt", &data, 2026, 2025).await;
-    let v = body_json(send(&f, get(&format!("/api/jobs/{id}"))).await).await;
+    let resp = send(&f, get(&format!("/api/jobs/{id}"))).await;
+    assert_eq!(resp.headers()["cache-control"], "no-store");
+    let v = body_json(resp).await;
     let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
     keys.sort();
     assert_eq!(

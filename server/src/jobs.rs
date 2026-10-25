@@ -104,6 +104,14 @@ pub struct NewJob {
     pub target: u16,
 }
 
+/// What `JobStore::cancel` found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelOutcome {
+    WasRunning,
+    Other,
+    NotFound,
+}
+
 #[derive(Default)]
 struct Inner {
     jobs: HashMap<JobId, Job>,
@@ -380,10 +388,17 @@ impl JobStore {
         }
     }
 
-    /// Cancels a job that has not finished yet and signals its token.
-    pub fn cancel(&self, id: &JobId) {
+    /// Cancels a job that has not finished yet and signals its token. The result says, decided
+    /// atomically under the lock, whether the job was running at that moment (its worker then
+    /// removes it once the engine lets go of the files).
+    pub fn cancel(&self, id: &JobId) -> CancelOutcome {
         let now = self.clock.now();
         if let Some(j) = self.lock().jobs.get_mut(id) {
+            let outcome = if j.state == JobState::Running {
+                CancelOutcome::WasRunning
+            } else {
+                CancelOutcome::Other
+            };
             j.cancel.cancel();
             if matches!(
                 j.state,
@@ -392,6 +407,9 @@ impl JobStore {
                 j.state = JobState::Cancelled;
                 j.finished_at = Some(now);
             }
+            outcome
+        } else {
+            CancelOutcome::NotFound
         }
     }
 
@@ -528,6 +546,40 @@ mod tests {
             err_of(s.create(req(), ip(1), &pairs())),
             (StatusCode::TOO_MANY_REQUESTS, "hourly_limit", Some(3300))
         );
+    }
+
+    #[test]
+    fn cancel_reports_running_atomically() {
+        let (s, _c, _d) = setup();
+        assert_eq!(s.cancel(&JobId::random()), CancelOutcome::NotFound);
+        let waiting = s.create(req(), ip(1), &pairs()).unwrap();
+        assert_eq!(s.cancel(&waiting.id), CancelOutcome::Other);
+        let queued = s.create(req(), ip(2), &pairs()).unwrap();
+        s.mark_uploaded(&queued.id);
+        let running = s.create(req(), ip(3), &pairs()).unwrap();
+        s.mark_uploaded(&running.id);
+        let taken = s.take_next().unwrap();
+        assert_eq!(taken.id, queued.id);
+        assert_eq!(s.cancel(&queued.id), CancelOutcome::WasRunning);
+        assert_eq!(s.get(&queued.id).unwrap().state, JobState::Cancelled);
+        // A cancelled queued job is never taken by a worker.
+        assert_eq!(s.cancel(&running.id), CancelOutcome::Other);
+        assert!(s.take_next().is_none());
+        // Cancelling twice reports that it is no longer running.
+        assert_eq!(s.cancel(&queued.id), CancelOutcome::Other);
+    }
+
+    #[test]
+    fn ok_after_cancel_is_ignored_by_finish_so_worker_must_remove() {
+        let (s, _c, _d) = setup();
+        let j = s.create(req(), ip(1), &pairs()).unwrap();
+        s.mark_uploaded(&j.id);
+        let taken = s.take_next().unwrap();
+        assert_eq!(s.cancel(&j.id), CancelOutcome::WasRunning);
+        s.finish(&j.id, Ok(vec![]));
+        let after = s.get(&j.id).unwrap();
+        assert_eq!(after.state, JobState::Cancelled);
+        assert!(taken.cancel.is_cancelled());
     }
 
     #[test]
