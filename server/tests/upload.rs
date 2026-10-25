@@ -367,3 +367,53 @@ async fn patch_write_error_returns_507_and_removes_partial() {
     assert_eq!(after.error.unwrap().kind, ErrorKind::DiskFull);
     assert!(!input.is_file());
 }
+
+#[tokio::test]
+async fn head_on_closed_upload_is_409_and_on_removed_upload_404() {
+    let f = setup();
+    // Disk full: the job fails and HEAD says the upload is closed rather than a stale offset.
+    let job = make_job(&f, 10);
+    let id = job.id.to_string();
+    std::fs::create_dir_all(f.state.store.input_path(&job)).unwrap();
+    let r = f
+        .app
+        .clone()
+        .oneshot(good_patch(&id, 0, b"abc".to_vec()))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::INSUFFICIENT_STORAGE);
+    let r = f
+        .app
+        .clone()
+        .oneshot(simple(Method::HEAD, &id))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CONFLICT);
+
+    // Completed: queued jobs take no more data either.
+    let done = make_job(&f, 3);
+    let did = done.id.to_string();
+    f.app
+        .clone()
+        .oneshot(good_patch(&did, 0, b"xyz".to_vec()))
+        .await
+        .unwrap();
+    assert_eq!(f.state.store.get(&done.id).unwrap().state, JobState::Queued);
+    let r = f
+        .app
+        .clone()
+        .oneshot(simple(Method::HEAD, &did))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CONFLICT);
+
+    // Removed: 404.
+    f.state.store.remove(&done.id);
+    let r = f
+        .app
+        .clone()
+        .oneshot(simple(Method::HEAD, &did))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+}

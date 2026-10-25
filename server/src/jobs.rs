@@ -6,8 +6,8 @@ use crate::model::{ApiError, DroppedElement, ErrorKind, FileKind, JobState};
 use axum::http::StatusCode;
 use chrono::{DateTime, Duration, Utc};
 use std::collections::{HashMap, VecDeque};
-use std::net::IpAddr;
-use std::path::PathBuf;
+use std::net::{IpAddr, Ipv6Addr};
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::sync::Notify;
@@ -19,6 +19,26 @@ const MAX_QUEUED: usize = 20;
 const DONE_RETENTION_MIN: i64 = 60;
 const FAILED_RETENTION_MIN: i64 = 15;
 const EXPIRED_RECORD_HOURS: i64 = 24;
+/// An unfinished upload is dropped after this long without any accepted data...
+const UPLOAD_IDLE_MIN: i64 = 60;
+/// ...or this long after the job was created, whichever comes first.
+const UPLOAD_MAX_HOURS: i64 = 6;
+const HOUR_WINDOW_MIN: i64 = 60;
+/// Default for `JobStore::with_disk_budget`: 100 GiB.
+const DEFAULT_DISK_BUDGET: u64 = 100 << 30;
+const SERVER_FULL_RETRY_S: u64 = 600;
+
+/// The address the per-client limits count by: IPv4 addresses one by one, IPv6 addresses by
+/// their /64 network (one household or server usually holds a whole /64).
+pub fn rate_key(ip: IpAddr) -> IpAddr {
+    match ip.to_canonical() {
+        IpAddr::V6(v6) => {
+            let s = v6.segments();
+            IpAddr::V6(Ipv6Addr::new(s[0], s[1], s[2], s[3], 0, 0, 0, 0))
+        }
+        v4 => v4,
+    }
+}
 
 /// A 128-bit random identifier rendered as 32 lowercase hex characters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -90,6 +110,10 @@ pub struct Job {
     pub error: Option<JobError>,
     pub dropped: Vec<DroppedElement>,
     pub received: u64,
+    /// Creation time, then the time of the last accepted upload chunk.
+    pub last_activity: DateTime<Utc>,
+    /// Size of the converted file once the job is done.
+    pub output_size: u64,
     pub cancel: CancellationToken,
     pub report_code: Option<String>,
     /// True while a report for this job is being written.
@@ -138,6 +162,18 @@ pub struct JobStore {
     clock: Arc<dyn Clock>,
     inner: Mutex<Inner>,
     notify: Notify,
+    disk_budget: u64,
+}
+
+/// Disk space a job holds or has reserved: input plus output while it is unfinished, the
+/// output once done, the kept input after a failure.
+fn disk_use(j: &Job) -> u64 {
+    match j.state {
+        JobState::WaitingUpload | JobState::Queued | JobState::Running => j.size.saturating_mul(2),
+        JobState::Done => j.output_size,
+        JobState::Failed if j.report_code.is_none() => j.received,
+        _ => 0,
+    }
 }
 
 fn api(status: StatusCode, code: &'static str, msg: &str) -> ApiError {
@@ -151,7 +187,18 @@ impl JobStore {
             clock,
             inner: Mutex::new(Inner::default()),
             notify: Notify::new(),
+            disk_budget: DEFAULT_DISK_BUDGET,
         }
+    }
+
+    /// Sets how many bytes all live jobs may use together (see `create`).
+    pub fn with_disk_budget(mut self, bytes: u64) -> JobStore {
+        self.disk_budget = bytes;
+        self
+    }
+
+    pub fn data_dir(&self) -> &Path {
+        &self.data_dir
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -197,24 +244,27 @@ impl JobStore {
             ));
         }
 
+        let ip = rate_key(ip);
         let now = self.clock.now();
         let mut g = self.lock();
 
-        let hist = g.history.entry(ip).or_default();
-        let window = Duration::minutes(60);
-        while hist.front().is_some_and(|t| now - *t >= window) {
-            hist.pop_front();
-        }
-        if hist.len() >= MAX_JOBS_PER_HOUR {
-            let oldest = *hist.front().expect("non-empty history");
-            let ms = (oldest + window - now).num_milliseconds().max(0) as u64;
-            let secs = ms.div_ceil(1000).max(1);
-            return Err(api(
-                StatusCode::TOO_MANY_REQUESTS,
-                "hourly_limit",
-                "Hourly limit reached. Try again later.",
-            )
-            .retry_after(secs));
+        // Refused requests leave no history behind, so the map only holds addresses that made jobs.
+        let window = Duration::minutes(HOUR_WINDOW_MIN);
+        if let Some(hist) = g.history.get_mut(&ip) {
+            while hist.front().is_some_and(|t| now - *t >= window) {
+                hist.pop_front();
+            }
+            if hist.len() >= MAX_JOBS_PER_HOUR {
+                let oldest = *hist.front().expect("non-empty history");
+                let ms = (oldest + window - now).num_milliseconds().max(0) as u64;
+                let secs = ms.div_ceil(1000).max(1);
+                return Err(api(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "hourly_limit",
+                    "Hourly limit reached. Try again later.",
+                )
+                .retry_after(secs));
+            }
         }
 
         let count = |g: &Inner, f: &dyn Fn(&Job) -> bool| {
@@ -250,6 +300,15 @@ impl JobStore {
             )
             .retry_after(60));
         }
+        let in_use: u64 = g.jobs.values().map(disk_use).sum();
+        if in_use.saturating_add(req.size.saturating_mul(2)) > self.disk_budget {
+            return Err(api(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "server_full",
+                "The server is busy with other files. Try again later.",
+            )
+            .retry_after(SERVER_FULL_RETRY_S));
+        }
 
         let id = JobId::random();
         let seq = g.next_seq;
@@ -269,6 +328,8 @@ impl JobStore {
             error: None,
             dropped: Vec::new(),
             received: 0,
+            last_activity: now,
+            output_size: 0,
             cancel: CancellationToken::new(),
             report_code: None,
             reporting: false,
@@ -310,11 +371,13 @@ impl JobStore {
         Some(ahead)
     }
 
-    /// Adds to the received byte counter and returns the new total.
+    /// Adds to the received byte counter, marks the upload as active and returns the new total.
     pub fn add_received(&self, id: &JobId, n: u64) -> u64 {
+        let now = self.clock.now();
         match self.lock().jobs.get_mut(id) {
             Some(j) => {
                 j.received += n;
+                j.last_activity = now;
                 j.received
             }
             None => 0,
@@ -381,6 +444,20 @@ impl JobStore {
     }
 
     pub fn finish(&self, id: &JobId, outcome: Result<Vec<DroppedElement>, (ErrorKind, String)>) {
+        self.finish_with(id, outcome, 0);
+    }
+
+    /// Marks a running job done, recording the size of its converted file.
+    pub fn finish_done(&self, id: &JobId, dropped: Vec<DroppedElement>, output_size: u64) {
+        self.finish_with(id, Ok(dropped), output_size);
+    }
+
+    fn finish_with(
+        &self,
+        id: &JobId,
+        outcome: Result<Vec<DroppedElement>, (ErrorKind, String)>,
+        output_size: u64,
+    ) {
         let now = self.clock.now();
         let mut g = self.lock();
         let Some(j) = g.jobs.get_mut(id) else { return };
@@ -392,6 +469,7 @@ impl JobStore {
             Ok(dropped) => {
                 j.state = JobState::Done;
                 j.dropped = dropped;
+                j.output_size = output_size;
                 j.expires_at = Some(now + Duration::minutes(DONE_RETENTION_MIN));
             }
             Err((kind, message)) => {
@@ -457,13 +535,60 @@ impl JobStore {
         }
     }
 
-    /// Removes a job that is still waiting for its upload and was created before `cutoff`. The
-    /// state and age are checked under the lock, so a job that has been queued or taken by a
-    /// worker in the meantime is left alone.
-    pub fn remove_waiting_upload_older_than(&self, id: &JobId, cutoff: DateTime<Utc>) -> bool {
+    /// Removes a job that is still waiting for its upload when no data has arrived for more than
+    /// an hour, or when it was created more than 6 hours ago. The state and times are checked
+    /// under the lock, so a job that has been queued or has received data in the meantime is
+    /// left alone.
+    pub fn remove_stale_upload(&self, id: &JobId, now: DateTime<Utc>) -> bool {
         self.remove_if(id, |j| {
-            j.state == JobState::WaitingUpload && j.created_at < cutoff
+            j.state == JobState::WaitingUpload
+                && (now - j.last_activity > Duration::minutes(UPLOAD_IDLE_MIN)
+                    || now - j.created_at > Duration::hours(UPLOAD_MAX_HOURS))
         })
+    }
+
+    /// Drops per-client history older than the hourly window, and clients left with none.
+    pub fn prune_history(&self, now: DateTime<Utc>) {
+        let window = Duration::minutes(HOUR_WINDOW_MIN);
+        self.lock().history.retain(|_, hist| {
+            while hist.front().is_some_and(|t| now - *t >= window) {
+                hist.pop_front();
+            }
+            !hist.is_empty()
+        });
+    }
+
+    /// Number of clients with job history in the last hour.
+    pub fn history_len(&self) -> usize {
+        self.lock().history.len()
+    }
+
+    /// Cancels every job that has not finished, for shutdown. Running jobs are then removed by
+    /// their workers once the engine has exited.
+    pub fn cancel_all(&self) {
+        let ids: Vec<JobId> = self
+            .lock()
+            .jobs
+            .values()
+            .filter(|j| {
+                matches!(
+                    j.state,
+                    JobState::WaitingUpload | JobState::Queued | JobState::Running
+                )
+            })
+            .map(|j| j.id)
+            .collect();
+        for id in ids {
+            self.cancel(&id);
+        }
+    }
+
+    /// True while a cancelled job that was running is still waiting for its worker.
+    pub fn has_cancelled_running(&self) -> bool {
+        self.lock()
+            .jobs
+            .values()
+            .any(|j| j.state == JobState::Cancelled && j.started_at.is_some())
     }
 
     /// Removes a cancelled job that never started. A cancelled job that was running belongs to
@@ -498,7 +623,7 @@ impl JobStore {
         if let Err(e) = std::fs::remove_dir_all(self.job_dir(job))
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            eprintln!("could not remove job directory: {}", e.kind());
+            tracing::warn!(error = ?e.kind(), "could not remove job directory");
         }
     }
 
@@ -531,6 +656,7 @@ impl JobStore {
                     j.state = JobState::Expired;
                     j.expires_at = Some(now + Duration::hours(EXPIRED_RECORD_HOURS));
                     j.dropped = Vec::new();
+                    j.name = String::new();
                     j.clone()
                 }
                 _ => return false,
@@ -539,7 +665,7 @@ impl JobStore {
         if let Err(e) = std::fs::remove_dir_all(self.job_dir(&job))
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            eprintln!("could not remove job directory: {}", e.kind());
+            tracing::warn!(error = ?e.kind(), "could not remove job directory");
         }
         true
     }
@@ -564,7 +690,7 @@ impl JobStore {
             if let Err(e) = std::fs::remove_dir_all(self.job_dir(&j))
                 && e.kind() != std::io::ErrorKind::NotFound
             {
-                eprintln!("could not remove job directory: {}", e.kind());
+                tracing::warn!(error = ?e.kind(), "could not remove job directory");
             }
         }
     }
@@ -980,20 +1106,154 @@ mod tests {
     fn waiting_removal_rechecks_state_under_the_lock() {
         let (s, c, _d) = setup();
         let a = s.create(req(), ip(1), &pairs()).unwrap();
-        let cutoff = c.now() + chrono::Duration::hours(2);
+        let later = c.now() + chrono::Duration::hours(2);
         let stale = s.snapshot();
         assert_eq!(stale[0].state, JobState::WaitingUpload);
         // The upload completes after the snapshot was taken.
         s.mark_uploaded(&a.id);
-        assert!(!s.remove_waiting_upload_older_than(&a.id, cutoff));
+        assert!(!s.remove_stale_upload(&a.id, later));
         assert_eq!(s.get(&a.id).unwrap().state, JobState::Queued);
         assert!(s.job_dir(&a).exists());
-        // A job still waiting and old enough goes; one not old enough stays.
+        // A job still waiting and idle long enough goes; one not idle long enough stays.
         let b = s.create(req(), ip(2), &pairs()).unwrap();
-        assert!(!s.remove_waiting_upload_older_than(&b.id, c.now()));
-        assert!(s.remove_waiting_upload_older_than(&b.id, cutoff));
+        assert!(!s.remove_stale_upload(&b.id, c.now()));
+        assert!(s.remove_stale_upload(&b.id, later));
         assert!(s.get(&b.id).is_none());
         assert!(!s.job_dir(&b).exists());
+    }
+
+    #[test]
+    fn upload_with_recent_data_is_kept_until_the_6_hour_cap() {
+        let (s, c, _d) = setup();
+        let a = s.create(req(), ip(1), &pairs()).unwrap();
+        // A chunk arrives every 50 minutes: never idle for an hour.
+        for _ in 0..7 {
+            c.advance(Duration::from_secs(50 * 60));
+            assert!(!s.remove_stale_upload(&a.id, c.now()), "still active");
+            s.add_received(&a.id, 1);
+        }
+        // 5 h 50 min after creation, 0 min idle: kept. Past 6 h: removed despite recent data.
+        assert_eq!(s.get(&a.id).unwrap().last_activity, c.now());
+        c.advance(Duration::from_secs(10 * 60));
+        assert!(
+            !s.remove_stale_upload(&a.id, c.now()),
+            "exactly 6 h is not over"
+        );
+        c.advance(Duration::from_secs(1));
+        assert!(s.remove_stale_upload(&a.id, c.now()));
+    }
+
+    #[test]
+    fn idle_hour_after_last_chunk_removes_upload() {
+        let (s, c, _d) = setup();
+        let a = s.create(req(), ip(1), &pairs()).unwrap();
+        c.advance(Duration::from_secs(1800));
+        s.add_received(&a.id, 1);
+        c.advance(Duration::from_secs(3600));
+        assert!(!s.remove_stale_upload(&a.id, c.now()), "exactly 1 h idle");
+        c.advance(Duration::from_secs(1));
+        assert!(s.remove_stale_upload(&a.id, c.now()));
+    }
+
+    fn sized(size: u64) -> NewJob {
+        NewJob { size, ..req() }
+    }
+
+    #[test]
+    fn disk_budget_counts_reservations_outputs_and_kept_inputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(ManualClock::new(
+            chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap(),
+        ));
+        let s = JobStore::new(dir.path().to_path_buf(), clock).with_disk_budget(1000);
+        // Waiting upload: 2 x 200 reserved.
+        let a = s.create(sized(200), ip(1), &pairs()).unwrap();
+        // Another 2 x 250 reserved: 900 in use.
+        let b = s.create(sized(250), ip(2), &pairs()).unwrap();
+        let full = s.create(sized(60), ip(3), &pairs()).unwrap_err();
+        assert_eq!(
+            (full.status, full.code, full.retry_after_s),
+            (StatusCode::SERVICE_UNAVAILABLE, "server_full", Some(600))
+        );
+        assert!(
+            s.create(sized(50), ip(3), &pairs()).is_ok(),
+            "exactly the budget fits"
+        );
+        // a finishes with a 30-byte output: 60 + 500 + 100 in use.
+        s.mark_uploaded(&a.id);
+        s.take_next().unwrap();
+        s.finish_done(&a.id, Vec::new(), 30);
+        assert!(s.create(sized(170), ip(4), &pairs()).is_ok());
+        // b fails after receiving 250 bytes: its input is kept, the output reservation goes.
+        s.add_received(&b.id, 250);
+        s.set_failed_upload(&b.id, ErrorKind::DiskFull, "x".into());
+        // 30 + 250 + 100 + 340 = 720 in use.
+        assert_eq!(
+            s.create(sized(141), ip(5), &pairs()).unwrap_err().code,
+            "server_full"
+        );
+        assert!(s.create(sized(140), ip(5), &pairs()).is_ok());
+    }
+
+    #[test]
+    fn ipv6_clients_count_by_slash_64() {
+        let (s, _c, _d) = setup();
+        let v6 = |last: u16| IpAddr::from([0x2001, 0xdb8, 1, 2, 0, 0, 0, last]);
+        s.create(req(), v6(1), &pairs()).unwrap();
+        s.create(req(), v6(2), &pairs()).unwrap();
+        assert_eq!(
+            err_of(s.create(req(), v6(3), &pairs())).1,
+            "uploads_in_progress"
+        );
+        let other_net = IpAddr::from([0x2001, 0xdb8, 1, 3, 0, 0, 0, 1]);
+        assert!(s.create(req(), other_net, &pairs()).is_ok());
+        assert_eq!(rate_key("::ffff:10.0.0.1".parse().unwrap()), ip(1));
+        assert_eq!(rate_key(ip(7)), ip(7));
+    }
+
+    #[test]
+    fn refused_requests_leave_no_history_and_old_history_is_pruned() {
+        let (s, c, _d) = setup();
+        let mut bad = req();
+        bad.target = 2023;
+        assert!(s.create(bad, ip(1), &pairs()).is_err());
+        let j = s.create(req(), ip(2), &pairs()).unwrap();
+        s.create(req(), ip(2), &pairs()).unwrap();
+        // A refused third upload adds nothing to the history either.
+        assert!(s.create(req(), ip(2), &pairs()).is_err());
+        assert_eq!(s.history_len(), 1);
+        s.remove(&j.id);
+        c.advance(Duration::from_secs(3599));
+        s.prune_history(c.now());
+        assert_eq!(s.history_len(), 1);
+        c.advance(Duration::from_secs(1));
+        s.prune_history(c.now());
+        assert_eq!(s.history_len(), 0);
+    }
+
+    #[test]
+    fn expiry_clears_the_file_name() {
+        let (s, c, _d) = setup();
+        let a = done_job(&s);
+        assert!(s.expire(&a.id, c.now()));
+        assert_eq!(s.get(&a.id).unwrap().name, "");
+    }
+
+    #[test]
+    fn cancel_all_cancels_unfinished_jobs() {
+        let (s, _c, _d) = setup();
+        let waiting = s.create(req(), ip(1), &pairs()).unwrap();
+        let running = s.create(req(), ip(2), &pairs()).unwrap();
+        s.mark_uploaded(&running.id);
+        let taken = s.take_next().unwrap();
+        let done = done_job(&s);
+        s.cancel_all();
+        assert_eq!(s.get(&waiting.id).unwrap().state, JobState::Cancelled);
+        assert!(taken.cancel.is_cancelled());
+        assert!(s.has_cancelled_running());
+        assert_eq!(s.get(&done.id).unwrap().state, JobState::Done);
+        s.remove(&running.id);
+        assert!(!s.has_cancelled_running());
     }
 
     #[test]

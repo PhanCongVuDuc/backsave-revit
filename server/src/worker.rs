@@ -1,11 +1,13 @@
 //! Background workers that run queued jobs through the conversion engine.
 
-use crate::engine::{DowngradeRequest, Engine, EngineError};
+use crate::engine::{DowngradeRequest, Engine, EngineError, public_message};
 use crate::jobs::{Job, JobStore};
 use crate::model::{ErrorKind, time_limit};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
+
+const MIB: u64 = 1 << 20;
 
 /// Starts `n` workers; each takes queued jobs one at a time, forever.
 pub fn spawn_workers(n: usize, store: Arc<JobStore>, engine: Arc<Engine>) -> Vec<JoinHandle<()>> {
@@ -25,6 +27,7 @@ pub fn spawn_workers(n: usize, store: Arc<JobStore>, engine: Arc<Engine>) -> Vec
                             &for_panic,
                             ErrorKind::Crashed,
                             "The conversion engine stopped unexpectedly.".into(),
+                            None,
                         );
                     }
                 }
@@ -60,6 +63,7 @@ async fn run_job_inner(store: &JobStore, engine: &Engine, job: &Job) {
             job,
             ErrorKind::Mismatch,
             "The file is not what the browser reported.".into(),
+            None,
         );
     }
     if !probe.targets.contains(&job.target) {
@@ -68,6 +72,7 @@ async fn run_job_inner(store: &JobStore, engine: &Engine, job: &Job) {
             job,
             ErrorKind::Refused,
             "This conversion is not supported for this file.".into(),
+            None,
         );
     }
 
@@ -76,12 +81,23 @@ async fn run_job_inner(store: &JobStore, engine: &Engine, job: &Job) {
         output: output.clone(),
         log,
         target: job.target,
-        limit: time_limit(job.size, u32::from(job.year.saturating_sub(job.target))),
+        limit: time_limit(job.size, steps(job)),
     };
     match engine.downgrade(req, job.cancel.clone()).await {
         Ok(dropped) => {
+            // An engine that reports success must have left a non-empty output file.
+            let size = tokio::fs::metadata(&output).await.map_or(0, |m| m.len());
+            if size == 0 {
+                return fail(
+                    store,
+                    job,
+                    ErrorKind::Failed,
+                    "The conversion failed.".into(),
+                    Some(0),
+                );
+            }
             remove_file(&input);
-            store.finish(&job.id, Ok(dropped));
+            store.finish_done(&job.id, dropped, size);
         }
         Err(e) => {
             finish_error(store, job, e);
@@ -89,23 +105,37 @@ async fn run_job_inner(store: &JobStore, engine: &Engine, job: &Job) {
     }
 }
 
+fn steps(job: &Job) -> u32 {
+    u32::from(job.year.saturating_sub(job.target))
+}
+
 fn finish_error(store: &JobStore, job: &Job, e: EngineError) {
     let Some(kind) = e.kind() else {
         store.remove(&job.id);
         return;
     };
+    let exit_code = e.exit_code();
     let message = match e {
-        EngineError::Refused(m) => m,
+        EngineError::Refused(m) => public_message(&m, store.data_dir()),
         EngineError::Corrupt => "The file could not be read.".into(),
-        EngineError::Crashed => "The conversion engine stopped unexpectedly.".into(),
+        EngineError::Crashed(_) => "The conversion engine stopped unexpectedly.".into(),
         EngineError::TimedOut => "The conversion took too long and was stopped.".into(),
         _ => "The conversion failed.".into(),
     };
-    fail(store, job, kind, message);
+    fail(store, job, kind, message, exit_code);
 }
 
-/// Shared failure exit: drops any partial output, keeps input and log, marks the job failed.
-fn fail(store: &JobStore, job: &Job, kind: ErrorKind, message: String) {
+/// Shared failure exit: logs the failure, drops any partial output, keeps input and log, marks
+/// the job failed. The log line names the job, never the file or the engine's message.
+fn fail(store: &JobStore, job: &Job, kind: ErrorKind, message: String, exit_code: Option<i32>) {
+    tracing::warn!(
+        job_id = %job.id,
+        kind = kind.as_str(),
+        exit_code,
+        size_mib = job.size.div_ceil(MIB),
+        steps = steps(job),
+        "conversion failed"
+    );
     remove_file(&store.output_path(job));
     store.finish(&job.id, Err((kind, message)));
 }
@@ -115,6 +145,6 @@ fn remove_file(path: &Path) {
     if let Err(e) = std::fs::remove_file(path)
         && e.kind() != std::io::ErrorKind::NotFound
     {
-        eprintln!("could not delete a job file: {}", e.kind());
+        tracing::warn!(error = ?e.kind(), "could not delete a job file");
     }
 }

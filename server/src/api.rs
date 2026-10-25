@@ -1,6 +1,7 @@
 //! JSON API under `/api`: server info, job creation, status, downloads and deletion.
 
 use crate::AppState;
+use crate::config::IpCidr;
 use crate::jobs::{CancelOutcome, Job, JobId, NewJob, ReportClaim};
 use crate::model::{ApiError, DroppedElement, ErrorKind, FileKind, JobState, estimate};
 use axum::Json;
@@ -45,9 +46,16 @@ fn expired() -> ApiError {
 }
 
 /// Picks the address used for rate limits: the socket peer, or with a trusted proxy the last
-/// valid address in `X-Forwarded-For`.
-pub fn client_ip(trust_proxy: bool, headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
-    if trust_proxy {
+/// valid address in `X-Forwarded-For`. With a list of trusted proxies, the header counts only
+/// when the socket peer is in that list.
+pub fn client_ip(
+    trust_proxy: bool,
+    trusted: &[IpCidr],
+    headers: &HeaderMap,
+    peer: SocketAddr,
+) -> IpAddr {
+    let from_proxy = trusted.is_empty() || trusted.iter().any(|c| c.contains(peer.ip()));
+    if trust_proxy && from_proxy {
         let forwarded = headers
             .get_all("x-forwarded-for")
             .iter()
@@ -108,7 +116,12 @@ async fn create_job(
             "The file is empty.",
         ));
     }
-    let ip = client_ip(s.config.trust_proxy, &headers, peer);
+    let ip = client_ip(
+        s.config.trust_proxy,
+        &s.config.trusted_proxies,
+        &headers,
+        peer,
+    );
     let job = s.store.create(
         NewJob {
             name: req.name,
@@ -155,6 +168,12 @@ struct JobOut {
     error: Option<ErrorOut>,
     result: Option<ResultOut>,
     report_code: Option<String>,
+    /// The job id is the capability: its holder sees the request it made, to resume an upload.
+    name: String,
+    size: u64,
+    kind: FileKind,
+    year: u16,
+    target: u16,
 }
 
 async fn get_job(
@@ -202,7 +221,12 @@ async fn get_job(
                 message: e.message,
             }),
             result,
-            report_code: job.report_code,
+            report_code: job.report_code.clone(),
+            name: job.name.clone(),
+            size: job.size,
+            kind: job.kind,
+            year: job.year,
+            target: job.target,
         }),
     ))
 }
@@ -382,7 +406,7 @@ async fn report_job(
     };
     if !s.store.set_report_code(&job.id, code.clone()) {
         // The job vanished while the report was being written; the report itself is kept.
-        eprintln!("report written for a job that no longer exists");
+        tracing::warn!("report written for a job that no longer exists");
     }
     Ok((StatusCode::CREATED, Json(json!({ "report_code": code }))).into_response())
 }
@@ -412,23 +436,39 @@ mod tests {
     #[test]
     fn forwarded_for_used_only_when_trusted() {
         let h = xff("203.0.113.9, 198.51.100.4");
-        assert_eq!(client_ip(false, &h, peer()), peer().ip());
+        assert_eq!(client_ip(false, &[], &h, peer()), peer().ip());
         assert_eq!(
-            client_ip(true, &h, peer()),
+            client_ip(true, &[], &h, peer()),
             "198.51.100.4".parse::<IpAddr>().unwrap()
         );
     }
 
     #[test]
-    fn forwarded_for_skips_invalid_and_falls_back() {
+    fn forwarded_for_honored_only_from_listed_proxies() {
+        let h = xff("203.0.113.9");
+        let list: Vec<IpCidr> = vec!["192.0.2.0/24".parse().unwrap()];
+        // The peer 192.0.2.1 is in the list: the header counts.
         assert_eq!(
-            client_ip(true, &xff("203.0.113.9, garbage"), peer()),
+            client_ip(true, &list, &h, peer()),
             "203.0.113.9".parse::<IpAddr>().unwrap()
         );
-        assert_eq!(client_ip(true, &xff("nope"), peer()), peer().ip());
-        assert_eq!(client_ip(true, &HeaderMap::new(), peer()), peer().ip());
+        // A peer outside the list cannot pick its own address.
+        let other: SocketAddr = "198.51.100.7:5000".parse().unwrap();
+        assert_eq!(client_ip(true, &list, &h, other), other.ip());
+        // The list alone does not turn trust on.
+        assert_eq!(client_ip(false, &list, &h, peer()), peer().ip());
+    }
+
+    #[test]
+    fn forwarded_for_skips_invalid_and_falls_back() {
         assert_eq!(
-            client_ip(true, &xff("2001:db8::1"), peer()),
+            client_ip(true, &[], &xff("203.0.113.9, garbage"), peer()),
+            "203.0.113.9".parse::<IpAddr>().unwrap()
+        );
+        assert_eq!(client_ip(true, &[], &xff("nope"), peer()), peer().ip());
+        assert_eq!(client_ip(true, &[], &HeaderMap::new(), peer()), peer().ip());
+        assert_eq!(
+            client_ip(true, &[], &xff("2001:db8::1"), peer()),
             "2001:db8::1".parse::<IpAddr>().unwrap()
         );
     }

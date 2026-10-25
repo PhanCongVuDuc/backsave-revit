@@ -11,6 +11,7 @@ pub mod worker;
 
 use axum::Router;
 use axum::extract::{MatchedPath, Request};
+use axum::http::{HeaderValue, header};
 use axum::middleware::{Next, from_fn};
 use axum::response::Response;
 use std::sync::Arc;
@@ -37,7 +38,10 @@ pub fn app(state: AppState) -> Router {
         let index = dir.join("index.html");
         router = router.fallback_service(ServeDir::new(dir).fallback(ServeFile::new(index)));
     }
-    router.with_state(state).layer(from_fn(log_request))
+    router
+        .with_state(state)
+        .layer(from_fn(security_headers))
+        .layer(from_fn(log_request))
 }
 
 /// Logs method, route template and status. File names, bodies and job ids never appear.
@@ -49,5 +53,23 @@ async fn log_request(req: Request, next: Next) -> Response {
         .map_or_else(|| "(unmatched)".to_string(), |p| p.as_str().to_string());
     let resp = next.run(req).await;
     tracing::info!(%method, route = %route, status = resp.status().as_u16(), "request");
+    resp
+}
+
+const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+
+/// Browser hardening for every response: same-origin content only, no framing, no referrer.
+async fn security_headers(req: Request, next: Next) -> Response {
+    let mut resp = next.run(req).await;
+    let h = resp.headers_mut();
+    h.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(CONTENT_SECURITY_POLICY),
+    );
+    h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    h.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
     resp
 }

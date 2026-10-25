@@ -89,6 +89,21 @@ pub enum ErrorKind {
     DiskFull,
 }
 
+impl ErrorKind {
+    /// The wire name, e.g. `timed_out`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ErrorKind::Refused => "refused",
+            ErrorKind::Corrupt => "corrupt",
+            ErrorKind::Failed => "failed",
+            ErrorKind::Crashed => "crashed",
+            ErrorKind::TimedOut => "timed_out",
+            ErrorKind::Mismatch => "mismatch",
+            ErrorKind::DiskFull => "disk_full",
+        }
+    }
+}
+
 /// An API error rendered as `{"error":{"code","message","retry_after_s"}}`.
 #[derive(Debug, Clone)]
 pub struct ApiError {

@@ -4,14 +4,13 @@ use crate::clock::Clock;
 use crate::jobs::JobStore;
 use crate::model::JobState;
 use crate::reports::Reports;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 
 const SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
-const WAITING_UPLOAD_HOURS: i64 = 1;
 
 /// Empties `<data>/jobs` (creating it when missing). Jobs never survive a restart.
 pub fn wipe_jobs_dir(data: &Path) -> io::Result<()> {
@@ -27,11 +26,10 @@ pub fn wipe_jobs_dir(data: &Path) -> io::Result<()> {
 /// One retention pass. Queued and running jobs are never touched. Every decision is made by
 /// the store under its lock, so a job that changed state since the snapshot is left alone.
 pub fn sweep(store: &JobStore, reports: &Reports, now: DateTime<Utc>) {
-    let upload_cutoff = now - Duration::hours(WAITING_UPLOAD_HOURS);
     for job in store.snapshot() {
         match job.state {
             JobState::WaitingUpload => {
-                store.remove_waiting_upload_older_than(&job.id, upload_cutoff);
+                store.remove_stale_upload(&job.id, now);
             }
             JobState::Done | JobState::Failed if job.expires_at.is_some_and(|t| t < now) => {
                 store.expire(&job.id, now);
@@ -45,6 +43,7 @@ pub fn sweep(store: &JobStore, reports: &Reports, now: DateTime<Utc>) {
             _ => {}
         }
     }
+    store.prune_history(now);
     remove_orphans(store);
     reports.enforce(now);
 }
@@ -74,7 +73,7 @@ fn remove_path(path: &Path) {
     if let Err(e) = result
         && e.kind() != io::ErrorKind::NotFound
     {
-        eprintln!("could not remove an orphaned entry: {}", e.kind());
+        tracing::warn!(error = ?e.kind(), "could not remove an orphaned entry");
     }
 }
 
@@ -94,7 +93,7 @@ pub fn spawn_cleanup(
                 .await
                 .is_err()
             {
-                eprintln!("retention sweep panicked");
+                tracing::error!("retention sweep panicked");
             }
         }
     })

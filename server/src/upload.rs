@@ -108,6 +108,11 @@ async fn head_upload(
     Path(raw): Path<String>,
 ) -> Result<Response, ApiError> {
     let job = find_job(&state, &raw)?;
+    // A finished, failed or cancelled upload takes no more data; saying so stops the client from
+    // resuming at a stale offset.
+    if job.state != JobState::WaitingUpload {
+        return Err(closed());
+    }
     let mut resp = StatusCode::OK.into_response();
     let h = resp.headers_mut();
     h.insert(UPLOAD_OFFSET, HeaderValue::from(job.received));
@@ -122,9 +127,15 @@ fn storage_error(state: &AppState, job: &Job) -> ApiError {
     if std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_file())
         && let Err(e) = std::fs::remove_file(&path)
     {
-        eprintln!("could not remove partial upload: {}", e.kind());
+        tracing::warn!(error = ?e.kind(), "could not remove partial upload");
     }
     let message = "The server could not store the file.";
+    tracing::warn!(
+        job_id = %job.id,
+        kind = "disk_full",
+        size_mib = job.size.div_ceil(1 << 20),
+        "upload could not be stored"
+    );
     state
         .store
         .set_failed_upload(&job.id, ErrorKind::DiskFull, message.into());

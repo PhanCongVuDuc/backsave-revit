@@ -187,7 +187,7 @@ fn remove_dir(path: &Path) {
     if let Err(e) = fs::remove_dir_all(path)
         && e.kind() != io::ErrorKind::NotFound
     {
-        eprintln!("could not remove a report: {}", e.kind());
+        tracing::warn!(error = ?e.kind(), "could not remove a report");
     }
 }
 

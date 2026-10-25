@@ -227,3 +227,31 @@ async fn two_workers_run_two_jobs() {
     f.state.store.cancel(&a.id);
     f.state.store.cancel(&b.id);
 }
+
+#[tokio::test]
+async fn success_without_output_is_a_failure() {
+    let f = setup();
+    start(&f, 1);
+    let job = queue_job(&f, 1, 2026, 2024, "empty-output", 2026);
+    let failed = wait_terminal(&f, &job.id).await;
+    assert_eq!(failed.state, JobState::Failed);
+    assert_eq!(failed.error.unwrap().kind, ErrorKind::Failed);
+    assert!(!f.state.store.output_path(&job).exists());
+    assert!(
+        f.state.store.input_path(&job).exists(),
+        "input kept for a report"
+    );
+}
+
+#[tokio::test]
+async fn done_job_records_its_output_size() {
+    let f = setup();
+    start(&f, 1);
+    let job = queue_job(&f, 1, 2026, 2024, "ok", 2026);
+    let done = wait_terminal(&f, &job.id).await;
+    let on_disk = std::fs::metadata(f.state.store.output_path(&job))
+        .unwrap()
+        .len();
+    assert!(on_disk > 0);
+    assert_eq!(done.output_size, on_disk);
+}

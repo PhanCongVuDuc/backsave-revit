@@ -436,3 +436,40 @@ async fn concurrent_reports_make_one_report() {
     assert_eq!(statuses, [201, 409]);
     assert_eq!(report_dirs(&f).len(), 1);
 }
+
+#[test]
+fn slow_upload_survives_while_data_arrives() {
+    let f = setup();
+    let job = new_job(&f, 1);
+    for _ in 0..3 {
+        advance(&f, 50 * 60);
+        f.state.store.add_received(&job.id, 1);
+        run_sweep(&f);
+        assert!(f.state.store.get(&job.id).is_some());
+    }
+    advance(&f, 3601);
+    run_sweep(&f);
+    assert!(f.state.store.get(&job.id).is_none());
+}
+
+#[test]
+fn sweep_prunes_old_client_history() {
+    let f = setup();
+    let job = new_job(&f, 1);
+    f.state.store.remove(&job.id);
+    assert_eq!(f.state.store.history_len(), 1);
+    advance(&f, 3600);
+    run_sweep(&f);
+    assert_eq!(f.state.store.history_len(), 0);
+}
+
+#[tokio::test]
+async fn expired_job_forgets_its_name() {
+    let f = setup();
+    let job = done_job(&f, 1);
+    advance(&f, 3601);
+    run_sweep(&f);
+    let after = f.state.store.get(&job.id).unwrap();
+    assert_eq!(after.state, JobState::Expired);
+    assert_eq!(after.name, "");
+}

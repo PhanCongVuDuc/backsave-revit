@@ -11,7 +11,7 @@ use std::process::exit;
 
 const MIN_YEAR: u32 = 2023;
 const MAX_YEAR: u32 = 2027;
-const MODES: [&str; 8] = [
+const MODES: [&str; 9] = [
     "ok",
     "refuse",
     "corrupt",
@@ -20,6 +20,7 @@ const MODES: [&str; 8] = [
     "crash",
     "probe-hang",
     "no-log",
+    "empty-output",
 ];
 
 #[derive(Parser)]
@@ -248,7 +249,13 @@ fn downgrade(input: &Path, to: u32, out: &Path, log: &Path) {
         );
     }
     let write_log_file = sel.mode != "no-log";
-    if std::fs::write(out, &bytes).is_err()
+    // `empty-output` reports success but leaves an empty file, like a broken engine would.
+    let written: &[u8] = if sel.mode == "empty-output" {
+        &[]
+    } else {
+        &bytes
+    };
+    if std::fs::write(out, written).is_err()
         || (write_log_file && write_log(log, kind, sel.year, to).is_err())
     {
         let _ = std::fs::remove_file(out);

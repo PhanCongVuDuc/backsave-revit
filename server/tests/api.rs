@@ -382,12 +382,22 @@ async fn job_json_has_no_internal_fields() {
             "error",
             "estimate_s",
             "expires_at",
+            "kind",
+            "name",
             "position",
             "report_code",
             "result",
-            "state"
+            "size",
+            "state",
+            "target",
+            "year"
         ]
     );
+    assert_eq!(v["name"], "House.rvt");
+    assert_eq!(v["kind"], "rvt");
+    assert_eq!(v["year"], 2026);
+    assert_eq!(v["target"], 2025);
+    assert_eq!(v["size"], data.len());
     let mut rkeys: Vec<&str> = v["result"]
         .as_object()
         .unwrap()
@@ -486,5 +496,108 @@ async fn api_unknown_route_is_json_404() {
             assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{uri}");
             assert_eq!(body_json(resp).await["error"]["code"], "not_found");
         }
+    }
+}
+
+#[tokio::test]
+async fn disk_full_upload_fails_job_and_closes_upload() {
+    let f = setup();
+    let data = marker_bytes("ok", 2026);
+    let id = create(&f, "House.rvt", &data, 2026, 2025).await;
+    // A directory at the input path makes storing the upload fail.
+    let job = f.state.store.get(&id.parse().unwrap()).unwrap();
+    std::fs::create_dir_all(f.state.store.input_path(&job)).unwrap();
+    let req = Request::builder()
+        .method(Method::PATCH)
+        .uri(format!("/api/uploads/{id}"))
+        .header("content-type", "application/offset+octet-stream")
+        .header("tus-resumable", "1.0.0")
+        .header("upload-offset", "0")
+        .body(Body::from(data.clone()))
+        .unwrap();
+    let resp = send(&f, req).await;
+    assert_eq!(resp.status(), StatusCode::INSUFFICIENT_STORAGE);
+    assert_eq!(body_json(resp).await["error"]["code"], "storage_error");
+    let head = Request::builder()
+        .method(Method::HEAD)
+        .uri(format!("/api/uploads/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(send(&f, head).await.status(), StatusCode::CONFLICT);
+    let v = body_json(send(&f, get(&format!("/api/jobs/{id}"))).await).await;
+    assert_eq!(v["state"], "failed");
+    assert_eq!(v["error"]["kind"], "disk_full");
+}
+
+#[tokio::test]
+async fn full_disk_budget_is_503_server_full() {
+    let dir = tempfile::tempdir().unwrap();
+    let clock = Arc::new(ManualClock::new(
+        chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap(),
+    ));
+    let mut state = common::test_state(dir.path(), clock.clone());
+    state.store = Arc::new(
+        backsave_server::jobs::JobStore::new(dir.path().to_path_buf(), clock).with_disk_budget(100),
+    );
+    let f = Fixture {
+        app: app(state.clone()),
+        state,
+        dir,
+    };
+    let r = send(&f, post_job(&job_body("A.rvt", 50, 2026, 2025))).await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let r = with_peer(post_job(&job_body("B.rvt", 1, 2026, 2025)), 2);
+    let r = f.app.clone().oneshot(r).await.unwrap();
+    assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(r.headers()["retry-after"], "600");
+    assert_eq!(body_json(r).await["error"]["code"], "server_full");
+}
+
+#[tokio::test]
+async fn forwarded_for_honored_only_from_trusted_proxy_list() {
+    for (list, honored) in [("10.0.0.1", true), ("10.9.0.0/16", false)] {
+        let f = setup_with(|c| {
+            c.trust_proxy = true;
+            c.trusted_proxies = vec![list.parse().unwrap()];
+        });
+        let make = |forwarded: &str| {
+            let mut req = post_job(&job_body("House.rvt", 10, 2026, 2025));
+            req.headers_mut()
+                .insert("x-forwarded-for", forwarded.parse().unwrap());
+            req
+        };
+        // The test peer is 10.0.0.1.
+        for _ in 0..2 {
+            assert_eq!(
+                send(&f, make("203.0.113.1")).await.status(),
+                StatusCode::CREATED
+            );
+        }
+        let r3 = send(&f, make("203.0.113.2")).await;
+        let want = if honored {
+            StatusCode::CREATED
+        } else {
+            StatusCode::TOO_MANY_REQUESTS
+        };
+        assert_eq!(r3.status(), want, "{list}");
+    }
+}
+
+#[tokio::test]
+async fn responses_carry_security_headers() {
+    let web = tempfile::tempdir().unwrap();
+    std::fs::write(web.path().join("index.html"), "<html>home</html>").unwrap();
+    let path = web.path().to_path_buf();
+    let f = setup_with(move |c| c.web_dir = Some(path));
+    for uri in ["/", "/job/abc", "/api/info"] {
+        let resp = send(&f, get(uri)).await;
+        let h = resp.headers();
+        assert_eq!(
+            h["content-security-policy"],
+            "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+            "{uri}"
+        );
+        assert_eq!(h["x-frame-options"], "DENY");
+        assert_eq!(h["referrer-policy"], "no-referrer");
     }
 }

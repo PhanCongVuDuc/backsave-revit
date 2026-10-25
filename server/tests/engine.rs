@@ -153,7 +153,7 @@ async fn crash_maps_to_crashed() {
         )
         .await
         .unwrap_err();
-    assert!(matches!(err, EngineError::Crashed), "{err:?}");
+    assert!(matches!(err, EngineError::Crashed(_)), "{err:?}");
     assert_eq!(err.kind(), Some(ErrorKind::Crashed));
 }
 
