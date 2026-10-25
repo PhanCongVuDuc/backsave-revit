@@ -16,6 +16,7 @@
       "button": "Thêm file Revit",
       "drop": "hoặc thả file vào đây",
       "limits": ".rvt, .rte, .rfa, .rft - tối đa 1 GB",
+      "support": "Backsave miễn phí và chạy trên một server nhỏ do tôi tự chi trả, nên tạm giới hạn file 1 GB. Nếu bạn thấy dự án có ích và muốn ủng hộ nâng cấp server để xử lý file lớn hơn, nhanh hơn, thông tin liên hệ ở cuối trang.",
       "input": "File Revit"
     },
     "kind": {

@@ -370,20 +370,36 @@ describe('shell', () => {
     );
   });
 
-  it('about_page_says_how_to_have_a_report_deleted_and_who_made_it', async () => {
-    await open('/how-it-works');
-    expect(screen.getByRole('link', { name: 'phancongvuduc@gmail.com' })).toHaveAttribute(
+  it('shows the author with email, LinkedIn and GitHub on every page', async () => {
+    await open();
+    const footer = within(screen.getByRole('contentinfo'));
+    expect(footer.getByText(/Author: Phan Cong Vu Duc/)).toBeInTheDocument();
+    expect(footer.getByRole('link', { name: 'phancongvuduc@gmail.com' })).toHaveAttribute(
       'href',
       'mailto:phancongvuduc@gmail.com',
     );
-    expect(screen.getByRole('link', { name: 'GitHub issues' })).toHaveAttribute(
+    expect(footer.getByRole('link', { name: 'LinkedIn' })).toHaveAttribute(
+      'href',
+      'https://www.linkedin.com/in/phancongvuduc/',
+    );
+    expect(footer.getByRole('link', { name: 'GitHub' })).toHaveAttribute('href', 'https://github.com/PhanCongVuDuc');
+  });
+
+  it('about_page_says_how_to_have_a_report_deleted_and_who_made_it', async () => {
+    await open('/how-it-works');
+    const page = within(screen.getByRole('main'));
+    expect(page.getByRole('link', { name: 'phancongvuduc@gmail.com' })).toHaveAttribute(
+      'href',
+      'mailto:phancongvuduc@gmail.com',
+    );
+    expect(page.getByRole('link', { name: 'GitHub issues' })).toHaveAttribute(
       'href',
       'https://github.com/PhanCongVuDuc/backsave-revit/issues',
     );
-    const linkedin = screen.getByRole('link', { name: 'LinkedIn' });
+    const linkedin = page.getByRole('link', { name: 'LinkedIn' });
     expect(linkedin).toHaveAttribute('href', 'https://www.linkedin.com/in/phancongvuduc/');
     expect(linkedin).toHaveAttribute('rel', 'noopener');
-    expect(screen.getByText(/Made by Phan Cong Vu Duc/)).toBeInTheDocument();
+    expect(page.getByText(/Made by Phan Cong Vu Duc/)).toBeInTheDocument();
   });
 
   it('about_page_lists_the_deletion_times', async () => {

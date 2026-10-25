@@ -69,6 +69,7 @@ function onDrop(event: DragEvent) {
     </button>
     <p class="drop-hint">{{ t('convert.add.drop') }}</p>
     <p class="limits">{{ t('convert.add.limits') }}</p>
+    <p class="support">{{ t('convert.add.support') }}</p>
     <input
       ref="input"
       type="file"
@@ -130,5 +131,12 @@ function onDrop(event: DragEvent) {
 
 .limits {
   font-size: 0.8125rem;
+}
+
+.support {
+  margin: var(--space-2) auto 0;
+  max-width: 22rem;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
 }
 </style>

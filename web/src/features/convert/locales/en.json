@@ -16,6 +16,7 @@
       "button": "Add a Revit file",
       "drop": "or drop it here",
       "limits": ".rvt, .rte, .rfa, .rft - up to 1 GB",
+      "support": "Backsave is free and runs on a small server I pay for myself, so files are limited to 1 GB. If you find this project useful and would like to help upgrade the server for larger files and faster conversions, my contact details are at the bottom of the page.",
       "input": "Revit file"
     },
     "kind": {

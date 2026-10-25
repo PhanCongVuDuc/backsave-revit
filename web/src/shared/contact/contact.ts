@@ -5,3 +5,4 @@ export const ISSUES_URL = `${REPO_URL}/issues`;
 export const CONTACT_EMAIL = 'phancongvuduc@gmail.com';
 export const AUTHOR_NAME = 'Phan Cong Vu Duc';
 export const LINKEDIN_URL = 'https://www.linkedin.com/in/phancongvuduc/';
+export const GITHUB_PROFILE_URL = 'https://github.com/PhanCongVuDuc';

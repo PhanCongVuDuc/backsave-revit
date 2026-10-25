@@ -3,7 +3,14 @@ import { useI18n } from 'vue-i18n';
 import { RouterLink, RouterView } from 'vue-router';
 
 import { LOCALES } from '@/app/i18n';
-import { REPO_LABEL, REPO_URL } from '@/shared/contact/contact';
+import {
+  AUTHOR_NAME,
+  CONTACT_EMAIL,
+  GITHUB_PROFILE_URL,
+  LINKEDIN_URL,
+  REPO_LABEL,
+  REPO_URL,
+} from '@/shared/contact/contact';
 
 const { t, locale } = useI18n();
 </script>
@@ -40,6 +47,11 @@ const { t, locale } = useI18n();
           <a :href="REPO_URL" rel="noopener">{{ REPO_LABEL }}</a>
         </template>
       </i18n-t>
+      <p class="author">
+        {{ t('footer.author') }}: {{ AUTHOR_NAME }} · <a :href="`mailto:${CONTACT_EMAIL}`">{{ CONTACT_EMAIL }}</a> ·
+        <a :href="LINKEDIN_URL" target="_blank" rel="noopener">LinkedIn</a> ·
+        <a :href="GITHUB_PROFILE_URL" target="_blank" rel="noopener">GitHub</a>
+      </p>
       <p>{{ t('footer.trademark') }}</p>
     </footer>
   </div>
