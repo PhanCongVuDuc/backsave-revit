@@ -15,21 +15,6 @@ export interface LocaleStorage {
   setItem: (key: string, value: string) => void;
 }
 
-/** `localStorage`, or an in-memory stand-in when the browser blocks it (reading the global itself can throw). */
-export function safeStorage(): LocaleStorage {
-  try {
-    return window.localStorage;
-  } catch {
-    const memory = new Map<string, string>();
-    return {
-      getItem: (key) => memory.get(key) ?? null,
-      setItem: (key, value) => {
-        memory.set(key, value);
-      },
-    };
-  }
-}
-
 function isLocale(value: string | null): value is AppLocale {
   return LOCALES.some((locale) => locale === value);
 }

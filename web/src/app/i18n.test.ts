@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import en from '@/shared/locales/en.json';
 import vi from '@/shared/locales/vi.json';
 
-import { createAppI18n, pickLocale, safeStorage } from './i18n';
+import { createAppI18n, pickLocale } from './i18n';
 
 function keysOf(value: object, prefix = ''): string[] {
   return Object.entries(value).flatMap(([key, child]) =>
@@ -68,21 +68,6 @@ describe('remembered locale', () => {
     expect(document.documentElement.lang).toBe('vi');
     i18n.global.locale.value = 'en';
     expect(document.documentElement.lang).toBe('en');
-  });
-});
-
-describe('safeStorage', () => {
-  it('falls back to memory when reading localStorage throws', () => {
-    Object.defineProperty(window, 'localStorage', {
-      configurable: true,
-      get() {
-        throw new Error('blocked');
-      },
-    });
-    const storage = safeStorage();
-    expect(storage.getItem('k')).toBeNull();
-    storage.setItem('k', 'v');
-    expect(storage.getItem('k')).toBe('v');
   });
 });
 

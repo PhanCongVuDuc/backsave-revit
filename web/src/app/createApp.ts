@@ -2,8 +2,9 @@ import { createPinia } from 'pinia';
 import { createApp } from 'vue';
 
 import App from '@/App.vue';
+import { safeStorage } from '@/shared/storage/safeStorage';
 
-import { createAppI18n, safeStorage } from './i18n';
+import { createAppI18n } from './i18n';
 import { createAppRouter } from './router';
 
 export function createBacksaveApp() {
