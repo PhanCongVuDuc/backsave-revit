@@ -10,7 +10,7 @@
 	}
 
 	reverse_proxy server:8080 {
-		# Large uploads and long conversions: do not cut slow clients off.
+		# Upstream timeouts: allow slow responses from the server without cutting the connection.
 		transport http {
 			read_timeout 10m
 			write_timeout 10m

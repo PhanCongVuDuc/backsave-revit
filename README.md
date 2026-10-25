@@ -89,7 +89,7 @@ BACKSAVE_DOMAIN=example.org docker compose -f deploy/docker-compose.yml up -d --
 ```
 
 This starts the server and [Caddy](https://caddyserver.com/), which obtains a TLS certificate for `BACKSAVE_DOMAIN`
-(default `localhost`). Conversion data lives in the `data` volume.
+(default `localhost`). Conversion data lives in the `data` volume. To try it: `curl -kL http://localhost/api/info`.
 
 The conversion engine is closed source and is not included. The image ships with the stub, which only copies files, so
 a fresh deployment does not really convert anything. To use a real engine, mount its executable over `/app/engine`
@@ -100,10 +100,10 @@ command-line contract above and run on Debian 12.
 
 | Method and path | Purpose |
 | --- | --- |
-| `GET /api/info` | Supported version pairs, limits, queue state, engine version |
+| `GET /api/info` | Supported version pairs, size limit, output lifetime, server version |
 | `POST /api/jobs` | Create a job and get its upload location |
 | `OPTIONS`, `HEAD`, `PATCH /api/uploads/{id}` | Resumable upload (tus 1.0.0) |
-| `GET /api/jobs/{id}` | Job state, progress and estimate |
+| `GET /api/jobs/{id}` | Job state, queue position, time estimate, result and error details |
 | `GET /api/jobs/{id}/file` | Download the converted file |
 | `GET /api/jobs/{id}/dropped` | Elements the engine could not carry over |
 | `POST /api/jobs/{id}/report` | Send a failed file for diagnosis (needs `{"consent": true}`) |
