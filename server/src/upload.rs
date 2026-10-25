@@ -119,10 +119,10 @@ async fn head_upload(
 /// Deletes the partial input, fails the job as "disk full" and builds the 507 answer.
 fn storage_error(state: &AppState, job: &Job) -> ApiError {
     let path = state.store.input_path(job);
-    if std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_file()) {
-        if let Err(e) = std::fs::remove_file(&path) {
-            eprintln!("could not remove partial upload: {}", e.kind());
-        }
+    if std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_file())
+        && let Err(e) = std::fs::remove_file(&path)
+    {
+        eprintln!("could not remove partial upload: {}", e.kind());
     }
     let message = "The server could not store the file.";
     state
