@@ -5,3 +5,11 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+anyhow = "=1.0.104"
+axum = "=0.8.9"
+chrono = { version = "=0.4.45", features = ["serde"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+
+[dev-dependencies]
+tokio = { version = "=1.54.1", features = ["macros", "rt"] }
