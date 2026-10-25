@@ -1,0 +1,6 @@
+{
+  "app": { "name": "Backsave for Revit", "language": "Language" },
+  "nav": { "convert": "Convert", "about": "How it works" },
+  "convert": { "title": "Convert a Revit file" },
+  "about": { "title": "How it works" }
+}

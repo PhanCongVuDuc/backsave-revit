@@ -1,0 +1,6 @@
+{
+  "app": { "name": "Backsave for Revit", "language": "Ngôn ngữ" },
+  "nav": { "convert": "Chuyển đổi", "about": "Cách hoạt động" },
+  "convert": { "title": "Chuyển đổi tệp Revit" },
+  "about": { "title": "Cách hoạt động" }
+}
