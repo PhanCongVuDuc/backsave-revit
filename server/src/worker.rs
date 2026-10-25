@@ -16,13 +16,13 @@ pub fn spawn_workers(n: usize, store: Arc<JobStore>, engine: Arc<Engine>) -> Vec
             tokio::spawn(async move {
                 loop {
                     let job = store.next_job().await;
-                    let id = job.id;
+                    let for_panic = job.clone();
                     // Run each job in its own task so a panic cannot end this loop.
                     let run = tokio::spawn(run_job(store.clone(), engine.clone(), job));
                     if run.await.is_err() {
                         fail(
                             &store,
-                            &id,
+                            &for_panic,
                             ErrorKind::Crashed,
                             "The conversion engine stopped unexpectedly.".into(),
                         );
@@ -49,7 +49,7 @@ async fn run_job(store: Arc<JobStore>, engine: Arc<Engine>, job: Job) {
     if probe.kind != job.kind || probe.year != job.year {
         return fail(
             &store,
-            &job.id,
+            &job,
             ErrorKind::Mismatch,
             "The file is not what the browser reported.".into(),
         );
@@ -57,7 +57,7 @@ async fn run_job(store: Arc<JobStore>, engine: Arc<Engine>, job: Job) {
     if !probe.targets.contains(&job.target) {
         return fail(
             &store,
-            &job.id,
+            &job,
             ErrorKind::Refused,
             "This conversion is not supported for this file.".into(),
         );
@@ -76,7 +76,6 @@ async fn run_job(store: Arc<JobStore>, engine: Arc<Engine>, job: Job) {
             store.finish(&job.id, Ok(dropped));
         }
         Err(e) => {
-            remove_file(&output);
             finish_error(&store, &job, e);
         }
     }
@@ -94,11 +93,13 @@ fn finish_error(store: &JobStore, job: &Job, e: EngineError) {
         EngineError::TimedOut => "The conversion took too long and was stopped.".into(),
         _ => "The conversion failed.".into(),
     };
-    fail(store, &job.id, kind, message);
+    fail(store, job, kind, message);
 }
 
-fn fail(store: &JobStore, id: &crate::jobs::JobId, kind: ErrorKind, message: String) {
-    store.finish(id, Err((kind, message)));
+/// Shared failure exit: drops any partial output, keeps input and log, marks the job failed.
+fn fail(store: &JobStore, job: &Job, kind: ErrorKind, message: String) {
+    remove_file(&store.output_path(job));
+    store.finish(&job.id, Err((kind, message)));
 }
 
 /// Deletes a file; a missing file is fine, other errors are logged by kind only.
