@@ -68,7 +68,7 @@ async fn run_job(store: Arc<JobStore>, engine: Arc<Engine>, job: Job) {
         output: output.clone(),
         log,
         target: job.target,
-        limit: time_limit(job.size, u32::from(job.year - job.target)),
+        limit: time_limit(job.size, u32::from(job.year.saturating_sub(job.target))),
     };
     match engine.downgrade(req, job.cancel.clone()).await {
         Ok(dropped) => {
@@ -98,9 +98,6 @@ fn finish_error(store: &JobStore, job: &Job, e: EngineError) {
 }
 
 fn fail(store: &JobStore, id: &crate::jobs::JobId, kind: ErrorKind, message: String) {
-    if let Some(job) = store.get(id) {
-        remove_file(&store.output_path(&job));
-    }
     store.finish(id, Err((kind, message)));
 }
 

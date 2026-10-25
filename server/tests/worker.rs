@@ -2,6 +2,7 @@ mod common;
 
 use backsave_server::AppState;
 use backsave_server::clock::ManualClock;
+use backsave_server::engine::Engine;
 use backsave_server::jobs::{Job, JobId, NewJob};
 use backsave_server::model::{ErrorKind, FileKind, JobState};
 use backsave_server::worker::spawn_workers;
@@ -108,7 +109,10 @@ async fn ok_job_done_input_deleted_output_kept() {
     let job = queue_job(&f, 1, 2026, 2024, "ok", 2026);
     let done = wait_terminal(&f, &job.id).await;
     assert_eq!(done.state, JobState::Done);
-    assert!(done.expires_at.is_some());
+    assert_eq!(
+        done.expires_at.unwrap() - done.finished_at.unwrap(),
+        chrono::Duration::hours(1)
+    );
     assert!(!f.state.store.input_path(&job).exists());
     assert!(f.state.store.output_path(&job).exists());
     assert!(f.state.store.log_path(&job).exists());
@@ -194,9 +198,11 @@ async fn cancel_running_job_kills_and_deletes() {
 async fn cancel_queued_job_never_runs() {
     let f = setup();
     // Token cancelled but state left Queued: a worker that takes it must drop it without running the engine.
-    let job = queue_job(&f, 1, 2026, 2024, "hang", 2026);
+    let job = queue_job(&f, 1, 2026, 2024, "ok", 2026);
     job.cancel.cancel();
-    start(&f, 1);
+    // The engine path does not exist, so any attempt to start it would fail the job instead of removing it.
+    let missing = Arc::new(Engine::new(f._dir.path().join("no-such-engine")));
+    spawn_workers(1, f.state.store.clone(), missing);
     for _ in 0..200 {
         if f.state.store.get(&job.id).is_none() {
             break;
