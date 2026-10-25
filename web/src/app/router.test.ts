@@ -44,4 +44,10 @@ describe('router', () => {
     expect(router.currentRoute.value.params.id).toBe('0123456789abcdef0123456789abcdef');
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(convertEn.convert.title);
   });
+
+  it('sends an unknown address back to the start', async () => {
+    const router = await open('/no/such/page');
+    expect(router.currentRoute.value.name).toBe('convert');
+    expect(router.currentRoute.value.path).toBe('/');
+  });
 });

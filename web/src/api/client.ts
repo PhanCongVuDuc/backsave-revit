@@ -3,6 +3,7 @@ import type {
   CreateJobRequest,
   DroppedElement,
   DropReason,
+  FileKind,
   JobErrorKind,
   JobState,
   JobStatus,
@@ -123,6 +124,11 @@ interface WireJob {
   error: { kind: JobErrorKind; message: string } | null;
   result: { file_name: string; size: number; dropped_count: number } | null;
   report_code: string | null;
+  name: string;
+  size: number;
+  kind: FileKind;
+  year: number;
+  target: number;
 }
 
 export async function getJob(id: string): Promise<JobStatus> {
@@ -138,6 +144,11 @@ export async function getJob(id: string): Promise<JobStatus> {
       ? { fileName: wire.result.file_name, size: wire.result.size, droppedCount: wire.result.dropped_count }
       : null,
     reportCode: wire.report_code,
+    name: wire.name,
+    size: wire.size,
+    kind: wire.kind,
+    year: wire.year,
+    target: wire.target,
   };
 }
 
@@ -166,6 +177,11 @@ export async function deleteJob(id: string): Promise<void> {
 export async function sendReport(id: string): Promise<string> {
   const wire = await requestJson<{ report_code: string }>('POST', jobPath(id, '/report'), { consent: true });
   return wire.report_code;
+}
+
+/** The tus upload of a job (the server creates it together with the job). */
+export function jobUploadUrl(id: string): string {
+  return `/api/uploads/${encodeURIComponent(id)}`;
 }
 
 /** Where the browser downloads a finished job's file. */

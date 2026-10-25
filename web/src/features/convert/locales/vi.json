@@ -104,7 +104,15 @@
       "job_gone": "Máy chủ không còn phiên chuyển đổi này. Vui lòng chọn lại file.",
       "network": "Không kết nối được máy chủ. Kiểm tra kết nối rồi thử lại.",
       "unknown": "Đã xảy ra lỗi. Vui lòng thử lại.",
-      "upload_failed": "Việc tải lên bị gián đoạn. Kiểm tra kết nối rồi bấm Tiếp tục."
+      "upload_failed": "Việc tải lên bị gián đoạn. Kiểm tra kết nối rồi bấm Tiếp tục.",
+      "storage_error": "Máy chủ không lưu được file. Vui lòng thử lại sau.",
+      "upload_closed": "Việc tải lên này đã xong hoặc đã bị dừng.",
+      "server_full": "Máy chủ đang bận với các file khác. Vui lòng thử lại sau {minutes} phút."
+    },
+    "reopen": {
+      "prompt": "Việc tải lên {name} chưa xong. Chọn lại đúng file đó để tải tiếp.",
+      "mismatch": "Đây không phải file đó. Hãy chọn lại {name}, hoặc làm lại từ đầu.",
+      "startOver": "Làm lại từ đầu"
     }
   }
 }

@@ -10,6 +10,7 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
       { path: '/', name: 'convert', component: ConvertView },
       { path: '/how-it-works', name: 'about', component: AboutView },
       { path: '/job/:id', name: 'job', component: ConvertView },
+      { path: '/:unknown(.*)*', redirect: '/' },
     ],
   });
 }

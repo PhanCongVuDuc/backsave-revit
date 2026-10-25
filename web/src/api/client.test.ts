@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError, createJob, deleteJob, getDropped, getInfo, getJob, sendReport, uploadFile } from './index';
+import { shouldRetryUpload } from './upload';
 
 interface FakeUpload {
   file: unknown;
@@ -12,6 +13,7 @@ interface FakeUpload {
     onProgress?: (sent: number, total: number) => void;
     onSuccess?: () => void;
     onError?: (error: Error) => void;
+    onShouldRetry?: (error: Error, attempt: number, options: unknown) => boolean;
   };
   start: ReturnType<typeof vi.fn>;
   abort: ReturnType<typeof vi.fn>;
@@ -143,6 +145,11 @@ describe('api client', () => {
         error: null,
         result: { file_name: 'tower_2024.rvt', size: 999, dropped_count: 2 },
         report_code: null,
+        name: 'tower.rvt',
+        size: 1234,
+        kind: 'rvt',
+        year: 2026,
+        target: 2024,
       }),
     );
     await expect(getJob('b'.repeat(32))).resolves.toEqual({
@@ -154,6 +161,11 @@ describe('api client', () => {
       error: null,
       result: { fileName: 'tower_2024.rvt', size: 999, droppedCount: 2 },
       reportCode: null,
+      name: 'tower.rvt',
+      size: 1234,
+      kind: 'rvt',
+      year: 2026,
+      target: 2024,
     });
     expect(fetchMock.mock.calls[0]?.[0]).toBe(`/api/jobs/${'b'.repeat(32)}`);
   });
@@ -249,5 +261,40 @@ describe('uploadFile', () => {
       code: 'aborted',
     });
     expect(tus.uploads).toHaveLength(0);
+  });
+});
+
+describe('shouldRetryUpload', () => {
+  async function detailed(status: number, code?: string): Promise<Error> {
+    const { DetailedError } = await import('tus-js-client');
+    const error = new DetailedError('http');
+    const body = code ? JSON.stringify({ error: { code, message: code, retry_after_s: null } }) : '';
+    error.originalResponse = { getStatus: () => status, getBody: () => body, getHeader: () => undefined } as never;
+    return error;
+  }
+
+  it('does not retry answers that cannot change: full disk, gone, closed', async () => {
+    for (const status of [404, 410, 507]) {
+      expect(shouldRetryUpload(await detailed(status))).toBe(false);
+    }
+    expect(shouldRetryUpload(await detailed(409, 'upload_closed'))).toBe(false);
+  });
+
+  it('retries network failures, server errors and offset conflicts', async () => {
+    expect(shouldRetryUpload(new Error('offline'))).toBe(true);
+    expect(shouldRetryUpload(await detailed(502))).toBe(true);
+    expect(shouldRetryUpload(await detailed(409, 'offset_mismatch'))).toBe(true);
+    expect(shouldRetryUpload(await detailed(409, 'upload_busy'))).toBe(true);
+    expect(shouldRetryUpload(await detailed(423))).toBe(true);
+  });
+
+  it('does not retry other client errors', async () => {
+    expect(shouldRetryUpload(await detailed(413, 'too_large'))).toBe(false);
+    expect(shouldRetryUpload(await detailed(415))).toBe(false);
+  });
+
+  it('is the upload retry policy', () => {
+    void uploadFile(new File(['a'], 'a.rvt'), '/api/uploads/x');
+    expect(tus.uploads.at(-1)?.options.onShouldRetry).toBeDefined();
   });
 });

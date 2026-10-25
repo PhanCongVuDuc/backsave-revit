@@ -39,6 +39,11 @@ function status(overrides: Partial<JobStatus>): JobStatus {
     error: null,
     result: null,
     reportCode: null,
+    name: 'tower.rvt',
+    size: 1000,
+    kind: 'rvt',
+    year: 2026,
+    target: 2025,
     ...overrides,
   };
 }
@@ -163,7 +168,7 @@ describe('submitting', () => {
         status({
           state: 'done',
           elapsedS: 5,
-          expiresAt: '2026-10-25T13:00:00Z',
+          expiresAt: '2099-10-25T13:00:00Z',
           result: { fileName: 'tower.rvt', size: 9, droppedCount: 1 },
         }),
       );
@@ -191,7 +196,7 @@ describe('submitting', () => {
     await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
     await settle();
     expect(store.phase).toBe('done');
-    expect(store.expiresAt).toBe('2026-10-25T13:00:00Z');
+    expect(store.expiresAt).toBe('2099-10-25T13:00:00Z');
     expect(store.dropped).toEqual([{ elementId: 4, class: 'Wall', reason: 'no_rule', cascadeFrom: null }]);
 
     await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 5);
@@ -211,6 +216,7 @@ describe('submitting', () => {
   it('keeps the job after the upload gives up, so it can be resumed later', async () => {
     const store = await readyStore();
     mocked.uploadFile.mockRejectedValue(new ApiError(0, 'upload_failed', 'offline'));
+    mocked.getJob.mockResolvedValue(status({ state: 'waiting_upload' }));
     await store.submit();
     expect(store.phase).toBe('error');
     expect(store.error?.code).toBe('upload_failed');
@@ -221,6 +227,39 @@ describe('submitting', () => {
     expect(mocked.deleteJob).toHaveBeenCalledWith(JOB);
     expect(localStorage.getItem(JOB_STORAGE_KEY)).toBeNull();
     expect(store.phase).toBe('ready');
+  });
+
+  it('shows disk_full when the server could not store the upload', async () => {
+    const store = await readyStore();
+    mocked.uploadFile.mockRejectedValue(new ApiError(507, 'storage_error', 'could not store'));
+    mocked.getJob.mockResolvedValue(
+      status({ state: 'failed', error: { kind: 'disk_full', message: 'The server could not store the file.' } }),
+    );
+    await store.submit();
+    await settle();
+    expect(mocked.getJob).toHaveBeenCalledExactlyOnceWith(JOB);
+    expect(store.phase).toBe('failed');
+    expect(store.error?.code).toBe('disk_full');
+  });
+
+  it('follows the job when the upload was closed because it already finished', async () => {
+    const store = await readyStore();
+    mocked.uploadFile.mockRejectedValue(new ApiError(409, 'upload_closed', 'closed'));
+    mocked.getJob.mockResolvedValue(status({ state: 'queued', position: 1 }));
+    await store.submit();
+    await settle();
+    expect(store.phase).toBe('queued');
+    expect(store.position).toBe(1);
+  });
+
+  it('keeps the upload error when the job is still waiting for its data', async () => {
+    const store = await readyStore();
+    mocked.uploadFile.mockRejectedValue(new ApiError(0, 'upload_failed', 'offline'));
+    mocked.getJob.mockResolvedValue(status({ state: 'waiting_upload' }));
+    await store.submit();
+    await settle();
+    expect(store.phase).toBe('error');
+    expect(store.error?.code).toBe('upload_failed');
   });
 
   it('warns before leaving the page only while uploading', async () => {
@@ -331,7 +370,9 @@ describe('retained jobs', () => {
   it('retry_upload_resumes_same_job', async () => {
     const store = await readyStore();
     mocked.uploadFile.mockRejectedValueOnce(new ApiError(0, 'upload_failed', 'offline'));
-    mocked.getJob.mockResolvedValue(status({ state: 'queued', position: 1 }));
+    mocked.getJob
+      .mockResolvedValueOnce(status({ state: 'waiting_upload' }))
+      .mockResolvedValue(status({ state: 'queued', position: 1 }));
     await store.submit();
     expect(store.error?.code).toBe('upload_failed');
     await store.retryUpload();
@@ -398,14 +439,85 @@ describe('resume, cancel and delete', () => {
   });
 
   it('resume_waiting_upload_does_not_delete_job', async () => {
-    mocked.getJob.mockResolvedValue(status({ state: 'waiting_upload' }));
+    mocked.getJob.mockResolvedValue(status({ state: 'waiting_upload', name: 'tower.rvt', size: 4096 }));
     const store = useConvertStore();
     await store.resume(JOB);
-    expect(store.phase).toBe('error');
-    expect(store.error?.code).toBe('upload_interrupted');
+    expect(store.phase).toBe('pick');
+    expect(store.resumeCandidate).toEqual({
+      jobId: JOB,
+      uploadUrl: `/api/uploads/${JOB}`,
+      name: 'tower.rvt',
+      size: 4096,
+    });
     expect(mocked.deleteJob).not.toHaveBeenCalled();
+    // Another tab may own the upload: the id stays, in the store and in storage.
+    expect(store.jobId).toBe(JOB);
+    expect(localStorage.getItem(JOB_STORAGE_KEY)).toBe(JOB);
+  });
+
+  it('continues an unfinished upload when the same file is chosen again', async () => {
+    mocked.getInfo.mockResolvedValue(serverInfo(ALL_PAIRS));
+    const same = revitFile(2026);
+    mocked.getJob.mockResolvedValueOnce(
+      status({ state: 'waiting_upload', name: same.name, size: same.size, year: 2026, target: 2024 }),
+    );
+    const store = useConvertStore();
+    await store.resume(JOB);
+    mocked.getJob.mockResolvedValue(status({ state: 'queued', position: 0 }));
+    await store.chooseFile(same);
+    await settle();
+    expect(mocked.createJob).not.toHaveBeenCalled();
+    expect(mocked.uploadFile).toHaveBeenCalledWith(same, `/api/uploads/${JOB}`, expect.anything());
+    expect(store.resumeCandidate).toBeNull();
+    expect(store.jobId).toBe(JOB);
+    expect(store.target).toBe(2024);
+    expect(store.phase).toBe('queued');
+  });
+
+  it('asks again when a different file is chosen, and starting over deletes the old job', async () => {
+    mocked.getInfo.mockResolvedValue(serverInfo(ALL_PAIRS));
+    mocked.getJob.mockResolvedValue(status({ state: 'waiting_upload', name: 'tower.rvt', size: 1 }));
+    const store = useConvertStore();
+    await store.resume(JOB);
+    await store.chooseFile(revitFile(2026, 'other.rvt'));
+    expect(store.phase).toBe('pick');
+    expect(store.resumeMismatch).toBe(true);
+    expect(mocked.uploadFile).not.toHaveBeenCalled();
+
+    await store.startOver();
+    expect(mocked.deleteJob).toHaveBeenCalledWith(JOB);
+    expect(store.resumeCandidate).toBeNull();
+    expect(store.resumeMismatch).toBe(false);
     expect(store.jobId).toBeNull();
     expect(localStorage.getItem(JOB_STORAGE_KEY)).toBeNull();
+    expect(store.phase).toBe('pick');
+  });
+
+  it('a reopened running job shows its own versions', async () => {
+    mocked.getJob.mockResolvedValue(status({ state: 'running', kind: 'rfa', year: 2026, target: 2024 }));
+    const store = useConvertStore();
+    await store.resume(JOB);
+    expect(store.phase).toBe('running');
+    expect(store.info).toEqual({ kind: 'rfa', year: 2026 });
+    expect(store.target).toBe(2024);
+  });
+
+  it('re-checks a done job when its download expires', async () => {
+    const expiresAt = new Date(Date.now() + 5000).toISOString();
+    mocked.getJob.mockResolvedValueOnce(
+      status({ state: 'done', expiresAt, result: { fileName: 'a_R2025.rvt', size: 3, droppedCount: 0 } }),
+    );
+    const store = useConvertStore();
+    await store.resume(JOB);
+    expect(store.phase).toBe('done');
+    mocked.getJob.mockRejectedValue(new ApiError(410, 'expired', 'gone'));
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(mocked.getJob).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2000);
+    await settle();
+    expect(mocked.getJob).toHaveBeenCalledTimes(2);
+    expect(store.phase).toBe('error');
+    expect(store.error?.code).toBe('expired');
   });
 
   it('cancel aborts the upload, deletes the job and returns to pick', async () => {

@@ -104,7 +104,15 @@
       "job_gone": "The server no longer has this conversion. Please choose the file again.",
       "network": "The server could not be reached. Check your connection and try again.",
       "unknown": "Something went wrong. Please try again.",
-      "upload_failed": "The upload was interrupted. Check your connection, then resume."
+      "upload_failed": "The upload was interrupted. Check your connection, then resume.",
+      "storage_error": "The server could not store the file. Please try again later.",
+      "upload_closed": "This upload has already finished or was stopped.",
+      "server_full": "The server is busy with other files. Please try again in {minutes} min."
+    },
+    "reopen": {
+      "prompt": "An upload of {name} did not finish. Choose the same file to continue.",
+      "mismatch": "This is not the same file. Choose {name} again, or start over.",
+      "startOver": "Start over"
     }
   }
 }

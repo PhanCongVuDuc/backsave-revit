@@ -55,6 +55,11 @@ function status(overrides: Partial<JobStatus>): JobStatus {
     error: null,
     result: null,
     reportCode: null,
+    name: 'tower.rvt',
+    size: 1000,
+    kind: 'rvt',
+    year: 2026,
+    target: 2025,
     ...overrides,
   };
 }
@@ -189,6 +194,8 @@ describe('conversion card', () => {
 
   it('resume_button_after_retries_exhausted', async () => {
     mocked.uploadFile.mockRejectedValueOnce(new ApiError(0, 'upload_failed', 'offline'));
+    // The server still waits for the data.
+    mocked.getJob.mockResolvedValue(status({ state: 'waiting_upload' }));
     await open();
     await user().upload(screen.getByLabelText('Revit file'), revitFile());
     await settle();
@@ -353,10 +360,35 @@ describe('shell', () => {
     expect(screen.getByRole('button', { name: viConvert.convert.add.button })).toBeInTheDocument();
   });
 
+  it('says the tool is open source, with a link to the code', async () => {
+    await open();
+    expect(screen.getByText(/Backsave is open source/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'github.com/PhanCongVuDuc/backsave-revit' })).toHaveAttribute(
+      'href',
+      'https://github.com/PhanCongVuDuc/backsave-revit',
+    );
+  });
+
+  it('about_page_says_how_to_have_a_report_deleted_and_who_made_it', async () => {
+    await open('/how-it-works');
+    expect(screen.getByRole('link', { name: 'phancongvuduc@gmail.com' })).toHaveAttribute(
+      'href',
+      'mailto:phancongvuduc@gmail.com',
+    );
+    expect(screen.getByRole('link', { name: 'GitHub issues' })).toHaveAttribute(
+      'href',
+      'https://github.com/PhanCongVuDuc/backsave-revit/issues',
+    );
+    const linkedin = screen.getByRole('link', { name: 'LinkedIn' });
+    expect(linkedin).toHaveAttribute('href', 'https://www.linkedin.com/in/phancongvuduc/');
+    expect(linkedin).toHaveAttribute('rel', 'noopener');
+    expect(screen.getByText(/Made by Phan Cong Vu Duc/)).toBeInTheDocument();
+  });
+
   it('about_page_lists_the_deletion_times', async () => {
     await open('/how-it-works');
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('How your files are handled');
-    expect(screen.getAllByRole('row')).toHaveLength(6);
+    expect(screen.getAllByRole('row')).toHaveLength(7);
     expect(screen.getByRole('link', { name: /cleanup\.rs/ })).toHaveAttribute(
       'href',
       'https://github.com/PhanCongVuDuc/backsave-revit/blob/main/server/src/cleanup.rs',
@@ -365,6 +397,37 @@ describe('shell', () => {
       'href',
       'https://github.com/PhanCongVuDuc/backsave-revit/blob/main/server/src/reports.rs',
     );
+  });
+});
+
+describe('reopening', () => {
+  it('asks for the same file to continue an unfinished upload', async () => {
+    mocked.getJob.mockResolvedValueOnce(status({ state: 'waiting_upload', name: 'tower.rvt', size: 1 }));
+    await open(`/job/${JOB}`);
+    expect(
+      screen.getByText('An upload of tower.rvt did not finish. Choose the same file to continue.'),
+    ).toBeInTheDocument();
+    await user().upload(screen.getByLabelText('Revit file'), revitFile(2026, 'other.rvt'));
+    await settle();
+    expect(screen.getByText('This is not the same file. Choose tower.rvt again, or start over.')).toBeInTheDocument();
+    await user().click(screen.getByRole('button', { name: 'Start over' }));
+    await settle();
+    expect(mocked.deleteJob).toHaveBeenCalledWith(JOB);
+    expect(screen.queryByText(/did not finish/)).not.toBeInTheDocument();
+  });
+
+  it('shows the versions of a reopened running job', async () => {
+    mocked.getJob.mockResolvedValue(status({ state: 'running', elapsedS: 5, year: 2026, target: 2024 }));
+    await open(`/job/${JOB}`);
+    expect(screen.getByText(/^Converting 2026 → 2024/)).toBeInTheDocument();
+  });
+
+  it('explains a full disk after the upload broke', async () => {
+    mocked.getJob.mockResolvedValue(
+      status({ state: 'failed', error: { kind: 'disk_full', message: 'The server could not store the file.' } }),
+    );
+    await open(`/job/${JOB}`);
+    expect(screen.getByRole('alert')).toHaveTextContent(en.convert.failure.disk_full);
   });
 });
 

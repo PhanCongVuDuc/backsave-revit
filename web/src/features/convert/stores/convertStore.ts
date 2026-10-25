@@ -10,6 +10,7 @@ import {
   getInfo,
   getJob,
   jobFileUrl,
+  jobUploadUrl,
   type JobStatus,
   sendReport,
   type ServerInfo,
@@ -29,6 +30,14 @@ export interface ConvertError {
   code: string;
   message: string | null;
   retryAfterS: number | null;
+}
+
+/** A job whose upload did not finish, found on reopening: choosing the same file again continues it. */
+export interface ResumeCandidate {
+  jobId: string;
+  uploadUrl: string;
+  name: string;
+  size: number;
 }
 
 export const JOB_STORAGE_KEY = 'backsave.job';
@@ -58,6 +67,10 @@ export const useConvertStore = defineStore('convert', () => {
   const droppedError = ref<string | null>(null);
   /** The finished job's output file, from the server. */
   const result = ref<JobStatus['result']>(null);
+  /** Set in phase `pick` when a reopened job still waits for its upload. */
+  const resumeCandidate = ref<ResumeCandidate | null>(null);
+  /** The file chosen for `resumeCandidate` was not the same file. */
+  const resumeMismatch = ref(false);
   const downloadUrl = computed(() => (jobId.value !== null && result.value !== null ? jobFileUrl(jobId.value) : null));
 
   const serverInfo = shallowRef<ServerInfo | null>(null);
@@ -66,6 +79,10 @@ export const useConvertStore = defineStore('convert', () => {
   // Every reset, cancel, new file or new job starts a new session; a late answer from an older one is dropped.
   let session = 0;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  // Fires when a done job's download expires, to check it once more.
+  let expiryTimer: ReturnType<typeof setTimeout> | null = null;
+  // The expiry time already scheduled, so a server that still says done after it does not cause a loop.
+  let expiryScheduledFor: string | null = null;
   let uploadAbort: AbortController | null = null;
   let uploadedThisSession = false;
   // The tus URL of the current job, kept so an upload that gave up can be resumed with retryUpload().
@@ -136,6 +153,11 @@ export const useConvertStore = defineStore('convert', () => {
       clearTimeout(pollTimer);
       pollTimer = null;
     }
+    if (expiryTimer !== null) {
+      clearTimeout(expiryTimer);
+      expiryTimer = null;
+    }
+    expiryScheduledFor = null;
     uploadAbort?.abort();
     uploadAbort = null;
     uploadedThisSession = false;
@@ -155,6 +177,9 @@ export const useConvertStore = defineStore('convert', () => {
     result.value = null;
     jobId.value = null;
     uploadUrl = null;
+    resumeCandidate.value = null;
+    resumeMismatch.value = false;
+    expiryScheduledFor = null;
   }
 
   function clearAll() {
@@ -184,6 +209,15 @@ export const useConvertStore = defineStore('convert', () => {
 
   async function chooseFile(chosen: File): Promise<void> {
     if (phase.value !== 'pick' && phase.value !== 'ready' && phase.value !== 'error') {
+      return;
+    }
+    const candidate = resumeCandidate.value;
+    if (candidate) {
+      if (chosen.name === candidate.name && chosen.size === candidate.size) {
+        await continueUpload(chosen, candidate);
+      } else {
+        resumeMismatch.value = true;
+      }
       return;
     }
     // A job left behind by an upload that gave up is abandoned with the new choice. Any other retained job may still be
@@ -222,6 +256,29 @@ export const useConvertStore = defineStore('convert', () => {
     targets.value = allowed;
     target.value = allowed.includes(read.year - 1) ? read.year - 1 : highest;
     phase.value = 'ready';
+  }
+
+  /** Continues the reopened job's upload with the file the user chose again; tus resumes from the server's offset. */
+  async function continueUpload(chosen: File, candidate: ResumeCandidate): Promise<void> {
+    stop();
+    const token = session;
+    file.value = chosen;
+    resumeCandidate.value = null;
+    resumeMismatch.value = false;
+    uploadUrl = candidate.uploadUrl;
+    await runUpload(token, chosen, candidate.uploadUrl);
+  }
+
+  /** Gives up the reopened job's unfinished upload: deletes the job and starts from an empty card. */
+  async function startOver(): Promise<void> {
+    const candidate = resumeCandidate.value;
+    if (!candidate) {
+      return;
+    }
+    stop();
+    forget();
+    clearAll();
+    await deleteJob(candidate.jobId).catch(() => undefined);
   }
 
   function setTarget(year: number) {
@@ -271,7 +328,29 @@ export const useConvertStore = defineStore('convert', () => {
     }
   }
 
+  /** Checks a done job once more when its download expires, so the page says so instead of keeping a dead link. */
+  function scheduleExpiryCheck(token: number, at: string | null) {
+    const when = at === null ? Number.NaN : Date.parse(at);
+    if (Number.isNaN(when) || at === expiryScheduledFor) {
+      return;
+    }
+    expiryScheduledFor = at;
+    if (expiryTimer !== null) {
+      clearTimeout(expiryTimer);
+    }
+    const delay = Math.min(Math.max(0, when - Date.now()) + 1000, 2 ** 31 - 1);
+    expiryTimer = setTimeout(() => {
+      expiryTimer = null;
+      if (token === session) {
+        void poll(token);
+      }
+    }, delay);
+  }
+
   async function apply(id: string, current: JobStatus, token: number): Promise<void> {
+    // A reopened job knows its versions only from the server.
+    info.value ??= { kind: current.kind, year: current.year };
+    target.value ??= current.target;
     position.value = current.position;
     elapsedS.value = current.elapsedS;
     estimateS.value = current.estimateS;
@@ -285,11 +364,11 @@ export const useConvertStore = defineStore('convert', () => {
           schedulePoll(token);
           return;
         }
-        // Resumed while the upload is unfinished: the page that holds the file may be another tab still uploading, so the
-        // job is not deleted here; it is only forgotten, and the server expires it if nobody finishes the upload.
-        forget();
-        jobId.value = null;
-        fail('upload_interrupted');
+        // Reopened while the upload is unfinished: the user can choose the same file to continue it. The page that holds the
+        // file may be another tab still uploading, so the job is neither deleted nor forgotten here.
+        resumeCandidate.value = { jobId: id, uploadUrl: jobUploadUrl(id), name: current.name, size: current.size };
+        resumeMismatch.value = false;
+        phase.value = 'pick';
         return;
       case 'queued':
       case 'running':
@@ -298,6 +377,7 @@ export const useConvertStore = defineStore('convert', () => {
         return;
       case 'done':
         phase.value = 'done';
+        scheduleExpiryCheck(token, current.expiresAt);
         if (current.result?.droppedCount === 0) {
           dropped.value = [];
           return;
@@ -392,6 +472,24 @@ export const useConvertStore = defineStore('convert', () => {
         return;
       }
       uploadAbort = null;
+      // The server may have moved the job on (failed for a full disk, or queued after another tab finished the upload):
+      // follow it rather than showing the bare upload error.
+      const id = jobId.value;
+      let current: JobStatus | null = null;
+      if (id) {
+        try {
+          current = await getJob(id);
+        } catch {
+          current = null;
+        }
+      }
+      if (token !== session) {
+        return;
+      }
+      if (id && current && current.state !== 'waiting_upload') {
+        await apply(id, current, token);
+        return;
+      }
       if (cause instanceof ApiError && cause.code === 'job_gone') {
         forget();
       }
@@ -520,6 +618,8 @@ export const useConvertStore = defineStore('convert', () => {
     reportCode,
     reportError,
     jobId,
+    resumeCandidate,
+    resumeMismatch,
     droppedError,
     result,
     downloadUrl,
@@ -528,6 +628,7 @@ export const useConvertStore = defineStore('convert', () => {
     setTarget,
     submit,
     retryUpload,
+    startOver,
     cancel,
     deleteNow,
     consentReport,

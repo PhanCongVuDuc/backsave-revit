@@ -21,6 +21,28 @@ function uploadErrorOf(error: Error): ApiError {
     : parsed;
 }
 
+/** Answers that a retry cannot change: the job is gone, the disk is full, or the upload is closed. */
+const FINAL_STATUSES = new Set([404, 410, 507]);
+
+/**
+ * The retry policy for upload requests. Network failures, server errors, 423 and 409 offset or busy conflicts are retried
+ * (tus then asks the server for its offset); a full disk, a gone job, a closed upload and other client errors are not.
+ */
+export function shouldRetryUpload(error: Error): boolean {
+  const response = error instanceof DetailedError ? error.originalResponse : null;
+  if (!response) {
+    return true;
+  }
+  const status = response.getStatus();
+  if (FINAL_STATUSES.has(status)) {
+    return false;
+  }
+  if (status === 409) {
+    return apiErrorFrom(status, response.getBody(), null).code !== 'upload_closed';
+  }
+  return status < 400 || status >= 500 || status === 423;
+}
+
 /**
  * Sends `file` to the tus upload the server already created at `uploadUrl`. Rejects with an ApiError: `aborted` when
  * `signal` fires, `job_gone` on 404/410, the server's code for another refusal, `upload_failed` once retries run out.
@@ -37,6 +59,7 @@ export function uploadFile(file: Blob, uploadUrl: string, options: UploadOptions
       chunkSize: UPLOAD_CHUNK_SIZE,
       retryDelays: UPLOAD_RETRY_DELAYS,
       removeFingerprintOnSuccess: true,
+      onShouldRetry: (error) => shouldRetryUpload(error),
       onProgress: (sent, total) => {
         onProgress?.(sent, total);
       },

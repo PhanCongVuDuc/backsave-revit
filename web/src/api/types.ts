@@ -39,6 +39,12 @@ export interface JobStatus {
   error: { kind: JobErrorKind; message: string } | null;
   result: { fileName: string; size: number; droppedCount: number } | null;
   reportCode: string | null;
+  /** What the job was created with; the job id is the capability that reveals them. */
+  name: string;
+  size: number;
+  kind: FileKind;
+  year: number;
+  target: number;
 }
 
 export type DropReason = 'no_rule' | 'rule_broken' | 'cascade';

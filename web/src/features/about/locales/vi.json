@@ -13,7 +13,7 @@
       "rows": {
         "unfinished": {
           "what": "Việc tải lên chưa xong",
-          "when": "1 giờ sau khi bắt đầu"
+          "when": "1 giờ sau lần cuối nhận dữ liệu (tối đa 6 giờ)"
         },
         "original": {
           "what": "File gốc của bạn",
@@ -30,6 +30,10 @@
         "report": {
           "what": "File bạn chọn gửi đi xem xét",
           "when": "Sau 30 ngày hoặc khi bạn yêu cầu, tuỳ cái nào tới trước. Giữ tối đa 20 GB; file cũ nhất bị xoá trước."
+        },
+        "cancelled": {
+          "what": "Phiên chuyển đổi bạn đã huỷ",
+          "when": "Ngay lập tức"
         }
       }
     },
@@ -47,6 +51,13 @@
       "cleanup": "Quy tắc xoá (cleanup.rs)",
       "reports": "Báo cáo xem xét (reports.rs)"
     },
-    "back": "Quay lại trang chuyển đổi"
+    "back": "Quay lại trang chuyển đổi",
+    "contact": {
+      "title": "Yêu cầu xoá và câu hỏi",
+      "body": "Muốn xoá báo cáo sớm, hãy gửi email tới {email} hoặc mở issue tại {issues} kèm mã báo cáo. Riêng mã này không cho biết gì về bạn hay file của bạn.",
+      "issues": "GitHub issues"
+    },
+    "openSource": "Backsave là mã nguồn mở — bạn có thể tự kiểm tra file của mình được xử lý ra sao: {repo}",
+    "author": "Tác giả: {name} — {linkedin}"
   }
 }

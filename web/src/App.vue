@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n';
 import { RouterLink, RouterView } from 'vue-router';
 
 import { LOCALES } from '@/app/i18n';
+import { REPO_LABEL, REPO_URL } from '@/shared/contact/contact';
 
 const { t, locale } = useI18n();
 </script>
@@ -15,7 +16,7 @@ const { t, locale } = useI18n();
       </RouterLink>
       <nav class="links">
         <RouterLink :to="{ name: 'about' }">{{ t('nav.about') }}</RouterLink>
-        <a href="https://github.com/PhanCongVuDuc/backsave-revit" rel="noopener">{{ t('nav.source') }}</a>
+        <a :href="REPO_URL" rel="noopener">{{ t('nav.source') }}</a>
         <span class="languages" role="group" :aria-label="t('app.language')">
           <button
             v-for="code in LOCALES"
@@ -33,7 +34,14 @@ const { t, locale } = useI18n();
     <main>
       <RouterView />
     </main>
-    <footer class="app-footer">{{ t('footer.trademark') }}</footer>
+    <footer class="app-footer">
+      <i18n-t keypath="footer.openSource" tag="p" scope="global">
+        <template #repo>
+          <a :href="REPO_URL" rel="noopener">{{ REPO_LABEL }}</a>
+        </template>
+      </i18n-t>
+      <p>{{ t('footer.trademark') }}</p>
+    </footer>
   </div>
 </template>
 
@@ -118,5 +126,13 @@ main {
   color: var(--color-text-muted);
   font-size: 0.75rem;
   padding: var(--space-3) var(--space-4) var(--space-4);
+}
+
+.app-footer p {
+  margin: 0 0 var(--space-1);
+}
+
+.app-footer a {
+  color: inherit;
 }
 </style>

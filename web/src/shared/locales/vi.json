@@ -9,6 +9,7 @@
     "home": "Trang chủ Backsave for Revit"
   },
   "footer": {
-    "trademark": "Revit is a registered trademark of Autodesk, Inc. Backsave is not affiliated with or endorsed by Autodesk."
+    "trademark": "Revit is a registered trademark of Autodesk, Inc. Backsave is not affiliated with or endorsed by Autodesk.",
+    "openSource": "Backsave là mã nguồn mở — bạn có thể tự kiểm tra file của mình được xử lý ra sao: {repo}"
   }
 }

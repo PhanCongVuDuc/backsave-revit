@@ -2,8 +2,16 @@
 import { useI18n } from 'vue-i18n';
 import { RouterLink } from 'vue-router';
 
-const REPO = 'https://github.com/PhanCongVuDuc/backsave-revit';
-const ROWS = ['unfinished', 'original', 'failed', 'output', 'report'] as const;
+import {
+  AUTHOR_NAME,
+  CONTACT_EMAIL,
+  ISSUES_URL,
+  LINKEDIN_URL,
+  REPO_LABEL,
+  REPO_URL as REPO,
+} from '@/shared/contact/contact';
+
+const ROWS = ['unfinished', 'cancelled', 'original', 'failed', 'output', 'report'] as const;
 
 const { t } = useI18n();
 </script>
@@ -38,7 +46,22 @@ const { t } = useI18n();
     <h2>{{ t('about.logs.title') }}</h2>
     <p>{{ t('about.logs.body') }}</p>
 
+    <h2>{{ t('about.contact.title') }}</h2>
+    <i18n-t keypath="about.contact.body" tag="p" scope="global">
+      <template #email>
+        <a :href="`mailto:${CONTACT_EMAIL}`">{{ CONTACT_EMAIL }}</a>
+      </template>
+      <template #issues>
+        <a :href="ISSUES_URL" rel="noopener">{{ t('about.contact.issues') }}</a>
+      </template>
+    </i18n-t>
+
     <h2>{{ t('about.source.title') }}</h2>
+    <i18n-t keypath="about.openSource" tag="p" scope="global">
+      <template #repo>
+        <a :href="REPO" rel="noopener">{{ REPO_LABEL }}</a>
+      </template>
+    </i18n-t>
     <p>{{ t('about.source.body') }}</p>
     <ul>
       <li>
@@ -48,6 +71,13 @@ const { t } = useI18n();
         <a :href="`${REPO}/blob/main/server/src/reports.rs`" rel="noopener">{{ t('about.source.reports') }}</a>
       </li>
     </ul>
+
+    <i18n-t keypath="about.author" tag="p" scope="global" class="author">
+      <template #name>{{ AUTHOR_NAME }}</template>
+      <template #linkedin>
+        <a :href="LINKEDIN_URL" rel="noopener">LinkedIn</a>
+      </template>
+    </i18n-t>
 
     <p>
       <RouterLink :to="{ name: 'convert' }">{{ t('about.back') }}</RouterLink>
@@ -86,5 +116,10 @@ td {
 
 th {
   color: var(--color-text-muted);
+}
+
+.author {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
 }
 </style>

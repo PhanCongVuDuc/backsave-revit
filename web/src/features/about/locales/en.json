@@ -13,7 +13,7 @@
       "rows": {
         "unfinished": {
           "what": "An upload that was not finished",
-          "when": "1 hour after it was started"
+          "when": "1 hour after the last data arrived (6 hours at most)"
         },
         "original": {
           "what": "Your original file",
@@ -30,6 +30,10 @@
         "report": {
           "what": "A file you chose to send for review",
           "when": "After 30 days or when you ask, whichever comes first. At most 20 GB are kept; the oldest go first."
+        },
+        "cancelled": {
+          "what": "A conversion you cancelled",
+          "when": "Right away"
         }
       }
     },
@@ -47,6 +51,13 @@
       "cleanup": "Deletion rules (cleanup.rs)",
       "reports": "Review reports (reports.rs)"
     },
-    "back": "Back to the converter"
+    "back": "Back to the converter",
+    "contact": {
+      "title": "Deletion requests and questions",
+      "body": "To have a report deleted early, email {email} or open an issue at {issues} with your report code. The code alone identifies nothing about you or your file.",
+      "issues": "GitHub issues"
+    },
+    "openSource": "Backsave is open source — you can check exactly how your files are handled: {repo}",
+    "author": "Made by {name} — {linkedin}"
   }
 }
