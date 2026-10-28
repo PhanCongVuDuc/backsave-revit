@@ -23,7 +23,7 @@ export function revitFileBytes(year: number, stubMode?: string): Buffer {
   return Buffer.from(CFB.write(container, { type: 'array' }) as ArrayLike<number>);
 }
 
-const directory = mkdtempSync(join(tmpdir(), 'backsave-e2e-files-'));
+const directory = mkdtempSync(join(tmpdir(), 'revit-downgrade-e2e-files-'));
 
 /** Writes a Revit-like file with the given name and returns its path. The stub mode comes from the content, not the name. */
 export function revitFile(name: string, year: number, stubMode?: string): string {

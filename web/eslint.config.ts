@@ -17,13 +17,13 @@ const E2E_FILES = ['e2e/**/*.spec.ts'];
 
 export default defineConfigWithVueTs(
   {
-    name: 'backsave/ignores',
+    name: 'revit-downgrade/ignores',
     ignores: ['dist/**', 'node_modules/**', 'test-results/**', 'playwright-report/**'],
   },
   pluginVue.configs['flat/recommended'],
   vueTsConfigs.strictTypeChecked,
   {
-    name: 'backsave/code',
+    name: 'revit-downgrade/code',
     rules: {
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
@@ -43,7 +43,7 @@ export default defineConfigWithVueTs(
   },
   // checkDirectories is off because folders are kebab-case while files are camelCase or PascalCase.
   {
-    name: 'backsave/file-names',
+    name: 'revit-downgrade/file-names',
     files: ['src/**/*.{ts,vue}', 'e2e/**/*.ts'],
     plugins: { unicorn },
     rules: {
@@ -51,14 +51,14 @@ export default defineConfigWithVueTs(
     },
   },
   {
-    name: 'backsave/file-names-vue',
+    name: 'revit-downgrade/file-names-vue',
     files: ['src/**/*.vue'],
     rules: {
       'unicorn/filename-case': ['error', { cases: { pascalCase: true }, checkDirectories: false }],
     },
   },
   {
-    name: 'backsave/file-names-tests',
+    name: 'revit-downgrade/file-names-tests',
     files: TEST_FILES,
     rules: {
       // A test file is named after the file it tests, which is PascalCase for a component.
@@ -70,7 +70,7 @@ export default defineConfigWithVueTs(
   //  - only src/features/<name>/stores/ and src/app/ import @/api;
   //  - @/shared imports only @/shared.
   {
-    name: 'backsave/boundaries',
+    name: 'revit-downgrade/boundaries',
     files: SOURCE_FILES,
     plugins: { boundaries },
     settings: {
@@ -134,7 +134,7 @@ export default defineConfigWithVueTs(
     },
   },
   {
-    name: 'backsave/restricted-features',
+    name: 'revit-downgrade/restricted-features',
     files: ['src/features/**'],
     ignores: TEST_FILES,
     rules: {
@@ -146,7 +146,7 @@ export default defineConfigWithVueTs(
   },
   {
     ...vitest.configs.recommended,
-    name: 'backsave/tests-vitest',
+    name: 'revit-downgrade/tests-vitest',
     files: VITEST_FILES,
     rules: {
       ...vitest.configs.recommended.rules,
@@ -161,12 +161,12 @@ export default defineConfigWithVueTs(
   },
   {
     ...testingLibrary.configs['flat/vue'],
-    name: 'backsave/tests-testing-library',
+    name: 'revit-downgrade/tests-testing-library',
     files: COMPONENT_TEST_FILES,
   },
   {
     ...playwright.configs['flat/recommended'],
-    name: 'backsave/tests-e2e',
+    name: 'revit-downgrade/tests-e2e',
     files: E2E_FILES,
     rules: {
       ...playwright.configs['flat/recommended'].rules,

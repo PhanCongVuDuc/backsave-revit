@@ -294,7 +294,7 @@ describe('failure report', () => {
     const consent = screen.getByRole('checkbox');
     expect(consent).not.toBeChecked();
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
-    expect(screen.getByLabelText(/^Let Backsave keep this file for up to 30 days to find and fix the problem\./)).toBe(
+    expect(screen.getByLabelText(/^Let Revit Downgrade keep this file for up to 30 days to find and fix the problem\./)).toBe(
       consent,
     );
   });
@@ -344,7 +344,7 @@ describe('shell', () => {
     await open();
     expect(
       screen.getByText(
-        'Revit is a registered trademark of Autodesk, Inc. Backsave is not affiliated with or endorsed by Autodesk.',
+        'Revit is a registered trademark of Autodesk, Inc. Revit Downgrade is not affiliated with or endorsed by Autodesk.',
       ),
     ).toBeInTheDocument();
   });
@@ -353,7 +353,7 @@ describe('shell', () => {
     const { i18n } = await open();
     expect(screen.getByRole('link', { name: 'How your files are handled' })).toHaveAttribute('href', '/how-it-works');
     const source = screen.getByRole('link', { name: 'Source code' });
-    expect(source).toHaveAttribute('href', 'https://github.com/PhanCongVuDuc/backsave-revit');
+    expect(source).toHaveAttribute('href', 'https://github.com/PhanCongVuDuc/revit-downgrade');
     expect(source).toHaveAttribute('rel', 'noopener');
     expect(screen.getByRole('button', { name: 'EN' })).toHaveAttribute('aria-pressed', 'true');
     await user().click(screen.getByRole('button', { name: 'VI' }));
@@ -363,10 +363,10 @@ describe('shell', () => {
 
   it('says the tool is open source, with a link to the code', async () => {
     await open();
-    expect(screen.getByText(/Backsave is open source/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'github.com/PhanCongVuDuc/backsave-revit' })).toHaveAttribute(
+    expect(screen.getByText(/Revit Downgrade is open source/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'github.com/PhanCongVuDuc/revit-downgrade' })).toHaveAttribute(
       'href',
-      'https://github.com/PhanCongVuDuc/backsave-revit',
+      'https://github.com/PhanCongVuDuc/revit-downgrade',
     );
   });
 
@@ -394,7 +394,7 @@ describe('shell', () => {
     );
     expect(page.getByRole('link', { name: 'GitHub issues' })).toHaveAttribute(
       'href',
-      'https://github.com/PhanCongVuDuc/backsave-revit/issues',
+      'https://github.com/PhanCongVuDuc/revit-downgrade/issues',
     );
     const linkedin = page.getByRole('link', { name: 'LinkedIn' });
     expect(linkedin).toHaveAttribute('href', 'https://www.linkedin.com/in/phancongvuduc/');
@@ -408,11 +408,11 @@ describe('shell', () => {
     expect(screen.getAllByRole('row')).toHaveLength(7);
     expect(screen.getByRole('link', { name: /cleanup\.rs/ })).toHaveAttribute(
       'href',
-      'https://github.com/PhanCongVuDuc/backsave-revit/blob/main/server/src/cleanup.rs',
+      'https://github.com/PhanCongVuDuc/revit-downgrade/blob/main/server/src/cleanup.rs',
     );
     expect(screen.getByRole('link', { name: /reports\.rs/ })).toHaveAttribute(
       'href',
-      'https://github.com/PhanCongVuDuc/backsave-revit/blob/main/server/src/reports.rs',
+      'https://github.com/PhanCongVuDuc/revit-downgrade/blob/main/server/src/reports.rs',
     );
   });
 });

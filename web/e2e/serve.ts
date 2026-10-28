@@ -17,23 +17,23 @@ function run(command: string, args: string[], cwd: string) {
   }
 }
 
-run('cargo', ['build', '-p', 'backsave-server', '-p', 'engine-stub'], repoDir);
+run('cargo', ['build', '-p', 'revit-downgrade-server', '-p', 'engine-stub'], repoDir);
 run('npx', ['vite', 'build'], webDir);
 
-const dataDir = join(tmpdir(), 'backsave-e2e-data');
+const dataDir = join(tmpdir(), 'revit-downgrade-e2e-data');
 rmSync(dataDir, { recursive: true, force: true });
 mkdirSync(dataDir, { recursive: true });
 
-const server: ChildProcess = spawn(join(repoDir, 'target', 'debug', `backsave-server${exe}`), [], {
+const server: ChildProcess = spawn(join(repoDir, 'target', 'debug', `revit-downgrade-server${exe}`), [], {
   cwd: repoDir,
   stdio: 'inherit',
   env: {
     ...process.env,
-    BACKSAVE_ENGINE: join(repoDir, 'target', 'debug', `engine-stub${exe}`),
-    BACKSAVE_DATA: dataDir,
-    BACKSAVE_WEB_DIR: join(webDir, 'dist'),
-    BACKSAVE_LISTEN: '127.0.0.1:8181',
-    BACKSAVE_TRUST_PROXY: 'true',
+    REVIT_DOWNGRADE_ENGINE: join(repoDir, 'target', 'debug', `engine-stub${exe}`),
+    REVIT_DOWNGRADE_DATA: dataDir,
+    REVIT_DOWNGRADE_WEB_DIR: join(webDir, 'dist'),
+    REVIT_DOWNGRADE_LISTEN: '127.0.0.1:8181',
+    REVIT_DOWNGRADE_TRUST_PROXY: 'true',
   },
 });
 

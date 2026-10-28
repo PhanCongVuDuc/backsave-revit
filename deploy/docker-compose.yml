@@ -1,6 +1,6 @@
 # Run from the repository root:
-#   BACKSAVE_DOMAIN=example.org docker compose -f deploy/docker-compose.yml up -d --build
-# Without BACKSAVE_DOMAIN the site is served on https://localhost (self-signed certificate).
+#   REVIT_DOWNGRADE_DOMAIN=example.org docker compose -f deploy/docker-compose.yml up -d --build
+# Without REVIT_DOWNGRADE_DOMAIN the site is served on https://localhost (self-signed certificate).
 
 services:
   server:
@@ -12,14 +12,14 @@ services:
     init: true
     environment:
       # Only Caddy can reach the server, so its X-Forwarded-For is trusted.
-      BACKSAVE_TRUST_PROXY: "true"
+      REVIT_DOWNGRADE_TRUST_PROXY: "true"
       # Optional: honor the header only from these peers (IPs or CIDRs), e.g. the compose network.
-      # BACKSAVE_TRUSTED_PROXIES: "172.16.0.0/12"
-      # BACKSAVE_DISK_BUDGET_GIB: "100"
+      # REVIT_DOWNGRADE_TRUSTED_PROXIES: "172.16.0.0/12"
+      # REVIT_DOWNGRADE_DISK_BUDGET_GIB: "100"
     volumes:
       - data:/data
       # To use the real conversion engine instead of the bundled stub, mount it read-only:
-      # - ./engine/backsave-engine:/app/engine:ro
+      # - ./engine/revit-downgrade-engine:/app/engine:ro
     expose:
       - "8080"
 
@@ -32,7 +32,7 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      BACKSAVE_DOMAIN: ${BACKSAVE_DOMAIN:-localhost}
+      REVIT_DOWNGRADE_DOMAIN: ${REVIT_DOWNGRADE_DOMAIN:-localhost}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

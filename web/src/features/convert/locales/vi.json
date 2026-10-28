@@ -2,6 +2,7 @@
   "convert": {
     "title": "Hạ phiên bản file Revit",
     "lead": "Mở model mới bằng Revit cũ. Miễn phí. File tự xoá sau 1 giờ.",
+    "versions": "Revit 2027 · 2026 · 2025 · 2024 → xuống tới Revit 2023",
     "status": {
       "pick": "Chọn một file",
       "ready": "Sẵn sàng để hạ",
@@ -16,7 +17,7 @@
       "button": "Thêm file Revit",
       "drop": "hoặc thả file vào đây",
       "limits": ".rvt, .rte, .rfa, .rft - tối đa 1 GB",
-      "support": "Backsave miễn phí và chạy trên một server nhỏ do tôi tự chi trả, nên tạm giới hạn file 1 GB. Nếu bạn thấy dự án có ích và muốn ủng hộ nâng cấp server để xử lý file lớn hơn, nhanh hơn, thông tin liên hệ ở cuối trang.",
+      "support": "Revit Downgrade miễn phí và chạy trên một server nhỏ do tôi tự chi trả, nên tạm giới hạn file 1 GB. Nếu bạn thấy dự án có ích và muốn ủng hộ nâng cấp server để xử lý file lớn hơn, nhanh hơn, thông tin liên hệ ở cuối trang.",
       "input": "File Revit"
     },
     "kind": {
@@ -83,7 +84,7 @@
       "unknown": "Chuyển đổi thất bại. Sự cố đã được ghi lại."
     },
     "report": {
-      "consent": "Cho phép Backsave giữ file này tối đa 30 ngày để tìm và sửa lỗi. File chỉ dùng để sửa công cụ, không chia sẻ, và bị xoá sau 30 ngày hoặc khi bạn yêu cầu (bạn sẽ nhận một mã để nêu khi yêu cầu).",
+      "consent": "Cho phép Revit Downgrade giữ file này tối đa 30 ngày để tìm và sửa lỗi. File chỉ dùng để sửa công cụ, không chia sẻ, và bị xoá sau 30 ngày hoặc khi bạn yêu cầu (bạn sẽ nhận một mã để nêu khi yêu cầu).",
       "send": "Gửi",
       "sent": "Cảm ơn bạn. Mã báo cáo của bạn là {code}. Hãy nêu mã này nếu bạn muốn xoá file.",
       "failed": "Không gửi được báo cáo ({code}). Vui lòng thử lại.",
@@ -113,6 +114,31 @@
       "upload_closed": "Việc tải lên này đã xong hoặc đã bị dừng.",
       "server_full": "Máy chủ đang bận với các file khác. Vui lòng thử lại sau {minutes} phút.",
       "upload_in_other_tab": "File này đang được tải lên ở một tab khác."
+    },
+    "faq": {
+      "title": "Hỏi đáp về hạ phiên bản file Revit",
+      "items": {
+        "howTo": {
+          "q": "Làm sao hạ phiên bản (downgrade) file Revit về bản cũ?",
+          "a": "Thêm file ở trên, chọn phiên bản Revit cần dùng, bấm Hạ phiên bản rồi tải file đã hạ về mở bằng Revit bản cũ. Ví dụ model Revit 2026 mở được bằng Revit 2024. File từ Revit 2024 đến 2027 đều hạ được xuống tới Revit 2023, không cần cài gì."
+        },
+        "saveOlder": {
+          "q": "Revit có lưu file về phiên bản cũ được không?",
+          "a": "Không. Revit chỉ nâng phiên bản: mở được file của bản cũ và luôn lưu theo bản đang dùng. Revit không có \"Save As phiên bản cũ\", vì vậy mới có công cụ này."
+        },
+        "supported": {
+          "q": "Hỗ trợ những file và phiên bản nào?",
+          "a": "Project (.rvt), project template (.rte), family (.rfa) và family template (.rft) lưu bằng Revit 2024, 2025, 2026 hoặc 2027, hạ về bất kỳ phiên bản cũ hơn nào xuống tới Revit 2023. File tối đa 1 GB."
+        },
+        "lost": {
+          "q": "Có bị mất gì không?",
+          "a": "Element mà Revit bản cũ không biết, như tính năng mới thêm ở bản sau, sẽ bị bỏ. Hạ xong bạn xem được danh sách đầy đủ các element bị bỏ kèm ElementId và tải về dạng CSV."
+        },
+        "safe": {
+          "q": "File của tôi có an toàn không?",
+          "a": "File gốc bị xoá ngay khi hạ xong, file đã hạ bị xoá sau 1 giờ. File không được chia sẻ, và mã xử lý file là mã nguồn mở."
+        }
+      }
     }
   }
 }

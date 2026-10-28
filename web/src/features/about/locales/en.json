@@ -1,7 +1,7 @@
 {
   "about": {
     "title": "How your files are handled",
-    "intro": "Backsave for Revit converts a Revit file to an older Revit version. This page says what happens to your file and when it is deleted.",
+    "intro": "Revit Downgrade converts a Revit file to an older Revit version. This page says what happens to your file and when it is deleted.",
     "sent": {
       "title": "When your file is sent",
       "body": "The Revit version and the file type are read in your browser. Your file is only sent when you press Downgrade."
@@ -39,7 +39,7 @@
     },
     "cookies": {
       "title": "Cookies and tracking",
-      "body": "Backsave sets no tracking cookies and has no analytics or advertising. Your browser keeps your language choice and a list of your unfinished uploads (file name, size and date with the conversion ID), only so that choosing the same file again can continue its upload. The list is cleared when an upload finishes and after 6 hours."
+      "body": "Revit Downgrade sets no tracking cookies and has no analytics or advertising. Your browser keeps your language choice and a list of your unfinished uploads (file name, size and date with the conversion ID), only so that choosing the same file again can continue its upload. The list is cleared when an upload finishes and after 6 hours."
     },
     "logs": {
       "title": "Server logs",
@@ -57,7 +57,7 @@
       "body": "To have a report deleted early, email {email} or open an issue at {issues} with your report code. The code alone identifies nothing about you or your file.",
       "issues": "GitHub issues"
     },
-    "openSource": "Backsave is open source — you can check exactly how your files are handled: {repo}",
+    "openSource": "Revit Downgrade is open source — you can check exactly how your files are handled: {repo}",
     "author": "Made by {name} — {linkedin}"
   }
 }

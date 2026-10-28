@@ -1,7 +1,7 @@
 {
   "about": {
     "title": "Cách xử lý file của bạn",
-    "intro": "Backsave for Revit chuyển file Revit về phiên bản Revit cũ hơn. Trang này nói file của bạn được xử lý thế nào và khi nào bị xoá.",
+    "intro": "Revit Downgrade chuyển file Revit về phiên bản Revit cũ hơn. Trang này nói file của bạn được xử lý thế nào và khi nào bị xoá.",
     "sent": {
       "title": "Khi nào file được gửi",
       "body": "Phiên bản Revit và loại file được đọc ngay trong trình duyệt. File chỉ được gửi khi bạn bấm Hạ phiên bản."
@@ -39,7 +39,7 @@
     },
     "cookies": {
       "title": "Cookie và theo dõi",
-      "body": "Backsave không đặt cookie theo dõi, không có phân tích hay quảng cáo. Trình duyệt chỉ nhớ ngôn ngữ bạn chọn và danh sách các lần tải lên chưa xong (tên, dung lượng, ngày của file kèm mã phiên chuyển đổi), để khi chọn lại đúng file đó thì tải tiếp được. Danh sách được xoá khi tải lên xong và sau 6 giờ."
+      "body": "Revit Downgrade không đặt cookie theo dõi, không có phân tích hay quảng cáo. Trình duyệt chỉ nhớ ngôn ngữ bạn chọn và danh sách các lần tải lên chưa xong (tên, dung lượng, ngày của file kèm mã phiên chuyển đổi), để khi chọn lại đúng file đó thì tải tiếp được. Danh sách được xoá khi tải lên xong và sau 6 giờ."
     },
     "logs": {
       "title": "Nhật ký máy chủ",
@@ -57,7 +57,7 @@
       "body": "Muốn xoá báo cáo sớm, hãy gửi email tới {email} hoặc mở issue tại {issues} kèm mã báo cáo. Riêng mã này không cho biết gì về bạn hay file của bạn.",
       "issues": "GitHub issues"
     },
-    "openSource": "Backsave là mã nguồn mở — bạn có thể tự kiểm tra file của mình được xử lý ra sao: {repo}",
+    "openSource": "Revit Downgrade là mã nguồn mở — bạn có thể tự kiểm tra file của mình được xử lý ra sao: {repo}",
     "author": "Tác giả: {name} — {linkedin}"
   }
 }

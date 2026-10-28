@@ -19,7 +19,7 @@ const { t, locale } = useI18n();
   <div class="shell">
     <header class="app-header">
       <RouterLink class="wordmark" :to="{ name: 'convert' }" :aria-label="t('nav.home')">
-        Backsave <span class="light">for Revit</span>
+        Revit <span class="light">Downgrade</span>
       </RouterLink>
       <nav class="links">
         <RouterLink :to="{ name: 'about' }">{{ t('nav.about') }}</RouterLink>

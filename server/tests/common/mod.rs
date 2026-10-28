@@ -82,14 +82,14 @@ pub fn process_alive(pid: u32) -> bool {
 /// Application state for route tests: stub engine, every 2023-2027 pair, default limits, data under `data_dir`.
 pub fn test_state(
     data_dir: &Path,
-    clock: std::sync::Arc<backsave_server::clock::ManualClock>,
-) -> backsave_server::AppState {
-    use backsave_server::{AppState, config::Config, engine::Engine, jobs::JobStore};
+    clock: std::sync::Arc<revit_downgrade_server::clock::ManualClock>,
+) -> revit_downgrade_server::AppState {
+    use revit_downgrade_server::{AppState, config::Config, engine::Engine, jobs::JobStore};
     use std::sync::Arc;
     let engine = stub_path();
     let config = Config::from_lookup(|k| match k {
-        "BACKSAVE_ENGINE" => Some(engine.to_string_lossy().into_owned()),
-        "BACKSAVE_DATA" => Some(data_dir.to_string_lossy().into_owned()),
+        "REVIT_DOWNGRADE_ENGINE" => Some(engine.to_string_lossy().into_owned()),
+        "REVIT_DOWNGRADE_DATA" => Some(data_dir.to_string_lossy().into_owned()),
         _ => None,
     })
     .expect("test config");
@@ -105,7 +105,7 @@ pub fn test_state(
         config: Arc::new(config),
         pairs: Arc::new(pairs),
         clock,
-        reports: Arc::new(backsave_server::reports::Reports::new(
+        reports: Arc::new(revit_downgrade_server::reports::Reports::new(
             data_dir.join("reports"),
         )),
         engine_version: Arc::new("engine-stub 0.1.0".to_string()),

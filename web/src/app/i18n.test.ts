@@ -41,7 +41,7 @@ describe('createAppI18n', () => {
       },
     });
     i18n.global.locale.value = 'vi';
-    expect(stored['backsave.locale']).toBe('vi');
+    expect(stored['revit-downgrade.locale']).toBe('vi');
 
     const blocked = () => {
       throw new Error('blocked');

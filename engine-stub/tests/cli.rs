@@ -6,7 +6,7 @@ use std::path::Path;
 
 fn stub() -> Command {
     let mut c = Command::cargo_bin("engine-stub").unwrap();
-    c.env_remove("BACKSAVE_STUB_MODE");
+    c.env_remove("REVIT_DOWNGRADE_STUB_MODE");
     c
 }
 
@@ -190,7 +190,7 @@ fn env_mode_used_when_name_has_no_token() {
     let input = dir.path().join("look.rvt");
     fs::write(&input, b"x").unwrap();
     stub()
-        .env("BACKSAVE_STUB_MODE", "corrupt")
+        .env("REVIT_DOWNGRADE_STUB_MODE", "corrupt")
         .arg("downgrade")
         .arg(&input)
         .args(["--to", "2024", "--out"])

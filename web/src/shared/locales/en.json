@@ -1,17 +1,17 @@
 {
   "app": {
-    "name": "Backsave for Revit",
+    "name": "Revit Downgrade",
     "language": "Language"
   },
   "nav": {
     "about": "How your files are handled",
     "source": "Source code",
-    "home": "Backsave for Revit home"
+    "home": "Revit Downgrade home"
   },
   "footer": {
     "author": "Author",
     "authorAbout": "an engineer from Vietnam",
-    "trademark": "Revit is a registered trademark of Autodesk, Inc. Backsave is not affiliated with or endorsed by Autodesk.",
-    "openSource": "Backsave is open source — you can check exactly how your files are handled: {repo}"
+    "trademark": "Revit is a registered trademark of Autodesk, Inc. Revit Downgrade is not affiliated with or endorsed by Autodesk.",
+    "openSource": "Revit Downgrade is open source — you can check exactly how your files are handled: {repo}"
   }
 }

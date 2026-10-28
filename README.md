@@ -1,4 +1,4 @@
-# Backsave for Revit
+# Revit Downgrade
 
 Save a Revit file back to an older version of Revit, for free, in your browser.
 
@@ -35,10 +35,10 @@ The code that deletes files: [`server/src/cleanup.rs`](server/src/cleanup.rs) an
 
 ## Why only 1 GB?
 
-Backsave runs on a small server that I pay for myself. I'm an engineer building this in my spare time because I think
+Revit Downgrade runs on a small server that I pay for myself. I'm an engineer building this in my spare time because I think
 it's useful, and the budget is small. That's why files are limited to 1 GB and conversions run one at a time.
 
-If you find Backsave useful and would like to help pay for a bigger server, so it can handle larger files and convert
+If you find Revit Downgrade useful and would like to help pay for a bigger server, so it can handle larger files and convert
 faster, please get in touch: phancongvuduc@gmail.com or
 [LinkedIn](https://www.linkedin.com/in/phancongvuduc/). Thank you!
 
@@ -46,8 +46,8 @@ faster, please get in touch: phancongvuduc@gmail.com or
 
 ```sh
 (cd web && npm ci && npm run build)
-cargo build -p backsave-server -p engine-stub
-BACKSAVE_ENGINE=target/debug/engine-stub BACKSAVE_WEB_DIR=web/dist cargo run -p backsave-server
+cargo build -p revit-downgrade-server -p engine-stub
+REVIT_DOWNGRADE_ENGINE=target/debug/engine-stub REVIT_DOWNGRADE_WEB_DIR=web/dist cargo run -p revit-downgrade-server
 ```
 
 Then open http://127.0.0.1:8080. With Docker: `docker compose -f deploy/docker-compose.yml up -d --build`.
@@ -56,11 +56,11 @@ Then open http://127.0.0.1:8080. With Docker: `docker compose -f deploy/docker-c
 
 Made by Phan Cong Vu Duc ([LinkedIn](https://www.linkedin.com/in/phancongvuduc/)).
 Questions or deletion requests: phancongvuduc@gmail.com or
-[GitHub issues](https://github.com/PhanCongVuDuc/backsave-revit/issues).
+[GitHub issues](https://github.com/PhanCongVuDuc/revit-downgrade/issues).
 
 ## License
 
 [MIT](LICENSE).
 
-Autodesk and Revit are registered trademarks of Autodesk, Inc. Backsave is an independent project and is not
+Autodesk and Revit are registered trademarks of Autodesk, Inc. Revit Downgrade is an independent project and is not
 affiliated with or endorsed by Autodesk.

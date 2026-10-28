@@ -425,10 +425,10 @@ mod tests {
 
     #[test]
     fn public_message_strips_paths_and_data_dir() {
-        let data = Path::new("/srv/backsave data");
+        let data = Path::new("/srv/revit-downgrade data");
         assert_eq!(
             public_message(
-                "Cannot open /srv/backsave data/jobs/ab/in.rvt: denied",
+                "Cannot open /srv/revit-downgrade data/jobs/ab/in.rvt: denied",
                 data
             ),
             "Cannot open [path] denied"

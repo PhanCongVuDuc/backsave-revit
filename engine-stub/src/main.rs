@@ -1,7 +1,7 @@
 //! Stand-in for the conversion engine, used in development and tests.
 //!
 //! Behaviour is chosen from the file content first, then the file name, then the
-//! `BACKSAVE_STUB_MODE` environment variable, then defaults (year 2026, mode ok).
+//! `REVIT_DOWNGRADE_STUB_MODE` environment variable, then defaults (year 2026, mode ok).
 
 use clap::{Parser, Subcommand};
 use serde_json::json;
@@ -119,7 +119,7 @@ fn select(path: &Path, bytes: &[u8]) -> Selection {
         .file_name()
         .map(|n| n.to_string_lossy().to_lowercase())
         .unwrap_or_default();
-    let env_mode = std::env::var("BACKSAVE_STUB_MODE").ok().and_then(|v| {
+    let env_mode = std::env::var("REVIT_DOWNGRADE_STUB_MODE").ok().and_then(|v| {
         let v = v.to_lowercase();
         MODES.iter().copied().find(|m| *m == v)
     });

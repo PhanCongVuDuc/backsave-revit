@@ -1,7 +1,7 @@
 import type { KeyValueStorage } from '@/shared/storage/safeStorage';
 
 /** Where this browser lists its unfinished uploads. */
-export const UPLOADS_STORAGE_KEY = 'backsave.uploads';
+export const UPLOADS_STORAGE_KEY = 'revit-downgrade.uploads';
 /** The server drops an unfinished upload at the latest 6 hours after it was created. */
 export const UPLOAD_ENTRY_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 

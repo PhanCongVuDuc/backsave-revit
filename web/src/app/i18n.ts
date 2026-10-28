@@ -11,7 +11,7 @@ import vi from '@/shared/locales/vi.json';
 export const LOCALES = ['en', 'vi'] as const;
 export type AppLocale = (typeof LOCALES)[number];
 
-export const LOCALE_STORAGE_KEY = 'backsave.locale';
+export const LOCALE_STORAGE_KEY = 'revit-downgrade.locale';
 
 /** The two storage methods the app uses; `localStorage` satisfies it. */
 export interface LocaleStorage {

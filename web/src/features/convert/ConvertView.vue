@@ -6,6 +6,7 @@ import { useRoute, useRouter } from 'vue-router';
 import AddFile from './components/AddFile.vue';
 import ErrorPanel from './components/ErrorPanel.vue';
 import FailurePanel from './components/FailurePanel.vue';
+import FaqSection from './components/FaqSection.vue';
 import FileSummary from './components/FileSummary.vue';
 import ProgressPanel from './components/ProgressPanel.vue';
 import ResultPanel from './components/ResultPanel.vue';
@@ -116,6 +117,7 @@ onMounted(() => {
   <section class="convert">
     <h1>{{ t('convert.title') }}</h1>
     <p class="lead">{{ t('convert.lead') }}</p>
+    <p class="versions">{{ t('convert.versions') }}</p>
     <div ref="card" class="card" tabindex="-1">
       <AddFile v-if="store.phase === 'pick'" @file="store.chooseFile" />
       <FileSummary
@@ -172,6 +174,7 @@ onMounted(() => {
         @choose-another="store.cancel"
       />
     </div>
+    <FaqSection v-if="store.phase === 'pick'" />
     <p class="visually-hidden" role="status" aria-live="polite">{{ announcement }}</p>
   </section>
 </template>
@@ -191,6 +194,13 @@ h1 {
 
 .lead {
   color: var(--color-text-muted);
+  margin: 0 0 var(--space-1);
+  text-align: center;
+}
+
+.versions {
+  color: var(--color-text-muted);
+  font-size: 0.9375rem;
   margin: 0 0 var(--space-6);
   text-align: center;
 }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createBacksaveApp } from './createApp';
+import { createRevitDowngradeApp } from './createApp';
 
 const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
 
@@ -10,7 +10,7 @@ afterEach(() => {
   }
 });
 
-describe('createBacksaveApp', () => {
+describe('createRevitDowngradeApp', () => {
   it('still mounts, in en, when reading localStorage throws', () => {
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
@@ -19,7 +19,7 @@ describe('createBacksaveApp', () => {
       },
     });
     const root = document.createElement('div');
-    const app = createBacksaveApp();
+    const app = createRevitDowngradeApp();
     app.mount(root);
     expect(root.querySelector('header')).not.toBeNull();
     expect(document.documentElement.lang).toBe('en');

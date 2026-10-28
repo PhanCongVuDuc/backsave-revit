@@ -2,7 +2,7 @@
 // Without the Locks API (older browsers, tests) every request is granted, which is how the app behaved before locks.
 
 function lockName(jobId: string): string {
-  return `backsave-upload-${jobId}`;
+  return `revit-downgrade-upload-${jobId}`;
 }
 
 function locks(): LockManager | null {

@@ -1,4 +1,4 @@
-//! Server configuration, read from `BACKSAVE_*` environment variables.
+//! Server configuration, read from `REVIT_DOWNGRADE_*` environment variables.
 
 use anyhow::{Context, bail};
 use std::net::{IpAddr, SocketAddr};
@@ -89,29 +89,29 @@ impl Config {
     /// Builds the configuration from an arbitrary variable lookup (used by tests).
     pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> anyhow::Result<Config> {
         let non_empty = |k: &str| get(k).filter(|v| !v.is_empty());
-        let engine = non_empty("BACKSAVE_ENGINE").context("BACKSAVE_ENGINE is required")?;
-        let workers = match non_empty("BACKSAVE_WORKERS") {
+        let engine = non_empty("REVIT_DOWNGRADE_ENGINE").context("REVIT_DOWNGRADE_ENGINE is required")?;
+        let workers = match non_empty("REVIT_DOWNGRADE_WORKERS") {
             Some(v) => v
                 .parse::<usize>()
-                .context("BACKSAVE_WORKERS must be a number")?,
+                .context("REVIT_DOWNGRADE_WORKERS must be a number")?,
             None => 1,
         };
         if workers == 0 {
-            bail!("BACKSAVE_WORKERS must be at least 1");
+            bail!("REVIT_DOWNGRADE_WORKERS must be at least 1");
         }
-        let listen = non_empty("BACKSAVE_LISTEN")
+        let listen = non_empty("REVIT_DOWNGRADE_LISTEN")
             .unwrap_or_else(|| "127.0.0.1:8080".to_string())
             .parse()
-            .context("BACKSAVE_LISTEN must be host:port")?;
-        let trust_proxy = match non_empty("BACKSAVE_TRUST_PROXY") {
+            .context("REVIT_DOWNGRADE_LISTEN must be host:port")?;
+        let trust_proxy = match non_empty("REVIT_DOWNGRADE_TRUST_PROXY") {
             None => false,
             Some(v) => match v.to_ascii_lowercase().as_str() {
                 "1" | "true" | "yes" | "on" => true,
                 "0" | "false" | "no" | "off" => false,
-                _ => bail!("BACKSAVE_TRUST_PROXY must be true or false"),
+                _ => bail!("REVIT_DOWNGRADE_TRUST_PROXY must be true or false"),
             },
         };
-        let trusted_proxies = match non_empty("BACKSAVE_TRUSTED_PROXIES") {
+        let trusted_proxies = match non_empty("REVIT_DOWNGRADE_TRUSTED_PROXIES") {
             None => Vec::new(),
             Some(v) => v
                 .split(',')
@@ -120,23 +120,23 @@ impl Config {
                 .map(str::parse)
                 .collect::<anyhow::Result<Vec<IpCidr>>>()
                 .context(
-                    "BACKSAVE_TRUSTED_PROXIES must be a comma-separated list of IPs or CIDRs",
+                    "REVIT_DOWNGRADE_TRUSTED_PROXIES must be a comma-separated list of IPs or CIDRs",
                 )?,
         };
-        let budget_gib = match non_empty("BACKSAVE_DISK_BUDGET_GIB") {
+        let budget_gib = match non_empty("REVIT_DOWNGRADE_DISK_BUDGET_GIB") {
             None => DEFAULT_DISK_BUDGET_GIB,
             Some(v) => v
                 .parse::<u64>()
                 .ok()
                 .filter(|n| (1..=1 << 20).contains(n))
-                .context("BACKSAVE_DISK_BUDGET_GIB must be a whole number of GiB, at least 1")?,
+                .context("REVIT_DOWNGRADE_DISK_BUDGET_GIB must be a whole number of GiB, at least 1")?,
         };
         Ok(Config {
             engine: PathBuf::from(engine),
-            data: non_empty("BACKSAVE_DATA").map_or_else(|| PathBuf::from("./data"), PathBuf::from),
+            data: non_empty("REVIT_DOWNGRADE_DATA").map_or_else(|| PathBuf::from("./data"), PathBuf::from),
             workers,
             listen,
-            web_dir: non_empty("BACKSAVE_WEB_DIR").map(PathBuf::from),
+            web_dir: non_empty("REVIT_DOWNGRADE_WEB_DIR").map(PathBuf::from),
             trust_proxy,
             trusted_proxies,
             max_bytes: MAX_BYTES,
@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn config_defaults() {
         let c =
-            Config::from_lookup(lookup(HashMap::from([("BACKSAVE_ENGINE", "/bin/eng")]))).unwrap();
+            Config::from_lookup(lookup(HashMap::from([("REVIT_DOWNGRADE_ENGINE", "/bin/eng")]))).unwrap();
         assert_eq!(c.engine, PathBuf::from("/bin/eng"));
         assert_eq!(c.data, PathBuf::from("./data"));
         assert_eq!(c.workers, 1);
@@ -172,14 +172,14 @@ mod tests {
     #[test]
     fn config_overrides() {
         let c = Config::from_lookup(lookup(HashMap::from([
-            ("BACKSAVE_ENGINE", "e"),
-            ("BACKSAVE_DATA", "/d"),
-            ("BACKSAVE_WORKERS", "3"),
-            ("BACKSAVE_LISTEN", "0.0.0.0:9000"),
-            ("BACKSAVE_WEB_DIR", "/w"),
-            ("BACKSAVE_TRUST_PROXY", "true"),
-            ("BACKSAVE_TRUSTED_PROXIES", "172.16.0.0/12, ::1"),
-            ("BACKSAVE_DISK_BUDGET_GIB", "7"),
+            ("REVIT_DOWNGRADE_ENGINE", "e"),
+            ("REVIT_DOWNGRADE_DATA", "/d"),
+            ("REVIT_DOWNGRADE_WORKERS", "3"),
+            ("REVIT_DOWNGRADE_LISTEN", "0.0.0.0:9000"),
+            ("REVIT_DOWNGRADE_WEB_DIR", "/w"),
+            ("REVIT_DOWNGRADE_TRUST_PROXY", "true"),
+            ("REVIT_DOWNGRADE_TRUSTED_PROXIES", "172.16.0.0/12, ::1"),
+            ("REVIT_DOWNGRADE_DISK_BUDGET_GIB", "7"),
         ])))
         .unwrap();
         assert_eq!(c.data, PathBuf::from("/d"));
@@ -198,14 +198,14 @@ mod tests {
     fn engine_is_required_and_values_validated() {
         assert!(Config::from_lookup(lookup(HashMap::new())).is_err());
         for (k, v) in [
-            ("BACKSAVE_WORKERS", "0"),
-            ("BACKSAVE_LISTEN", "nope"),
-            ("BACKSAVE_TRUSTED_PROXIES", "10.0.0.0/33"),
-            ("BACKSAVE_TRUSTED_PROXIES", "proxy.local"),
-            ("BACKSAVE_DISK_BUDGET_GIB", "0"),
-            ("BACKSAVE_DISK_BUDGET_GIB", "1.5"),
+            ("REVIT_DOWNGRADE_WORKERS", "0"),
+            ("REVIT_DOWNGRADE_LISTEN", "nope"),
+            ("REVIT_DOWNGRADE_TRUSTED_PROXIES", "10.0.0.0/33"),
+            ("REVIT_DOWNGRADE_TRUSTED_PROXIES", "proxy.local"),
+            ("REVIT_DOWNGRADE_DISK_BUDGET_GIB", "0"),
+            ("REVIT_DOWNGRADE_DISK_BUDGET_GIB", "1.5"),
         ] {
-            let bad = HashMap::from([("BACKSAVE_ENGINE", "e"), (k, v)]);
+            let bad = HashMap::from([("REVIT_DOWNGRADE_ENGINE", "e"), (k, v)]);
             assert!(Config::from_lookup(lookup(bad)).is_err(), "{k}={v}");
         }
     }

@@ -2,6 +2,7 @@
   "convert": {
     "title": "Downgrade a Revit file",
     "lead": "Open a newer model in an older Revit. Free. Your file is deleted after 1 hour.",
+    "versions": "Revit 2027 · 2026 · 2025 · 2024 → down to Revit 2023",
     "status": {
       "pick": "Choose a file",
       "ready": "Ready to downgrade",
@@ -16,7 +17,7 @@
       "button": "Add a Revit file",
       "drop": "or drop it here",
       "limits": ".rvt, .rte, .rfa, .rft - up to 1 GB",
-      "support": "Backsave is free and runs on a small server I pay for myself, so files are limited to 1 GB. If you find this project useful and would like to help upgrade the server for larger files and faster conversions, my contact details are at the bottom of the page.",
+      "support": "Revit Downgrade is free and runs on a small server I pay for myself, so files are limited to 1 GB. If you find this project useful and would like to help upgrade the server for larger files and faster conversions, my contact details are at the bottom of the page.",
       "input": "Revit file"
     },
     "kind": {
@@ -83,7 +84,7 @@
       "unknown": "The conversion failed. The problem has been logged."
     },
     "report": {
-      "consent": "Let Backsave keep this file for up to 30 days to find and fix the problem. It is used only to fix the tool, never shared, and deleted after 30 days or when you ask (you will get a code to quote).",
+      "consent": "Let Revit Downgrade keep this file for up to 30 days to find and fix the problem. It is used only to fix the tool, never shared, and deleted after 30 days or when you ask (you will get a code to quote).",
       "send": "Send",
       "sent": "Thank you. Your report code is {code}. Quote it if you ask for the file to be deleted.",
       "failed": "The report could not be sent ({code}). Please try again.",
@@ -113,6 +114,31 @@
       "upload_closed": "This upload has already finished or was stopped.",
       "server_full": "The server is busy with other files. Please try again in {minutes} min.",
       "upload_in_other_tab": "This file is being uploaded in another tab."
+    },
+    "faq": {
+      "title": "Questions about downgrading Revit files",
+      "items": {
+        "howTo": {
+          "q": "How do I downgrade a Revit file to an older version?",
+          "a": "Add your file above, choose the Revit version you need and press Downgrade, then download the converted file and open it in that older Revit. For example, a Revit 2026 model can be opened in Revit 2024. Any file from Revit 2024 to 2027 can go down to Revit 2023, with nothing to install."
+        },
+        "saveOlder": {
+          "q": "Can Revit save a file to an older version?",
+          "a": "No. Revit only upgrades: it opens files from older versions and always saves in its own version. There is no \"Save As older version\" in Revit, which is why this tool exists."
+        },
+        "supported": {
+          "q": "Which files and versions are supported?",
+          "a": "Projects (.rvt), project templates (.rte), families (.rfa) and family templates (.rft) saved in Revit 2024, 2025, 2026 or 2027, converted to any older version down to Revit 2023. Files up to 1 GB."
+        },
+        "lost": {
+          "q": "Will I lose anything?",
+          "a": "Elements that the older Revit does not know, such as features added in a newer version, are removed. After the conversion you see the full list of removed elements with their ElementIds and can download it as CSV."
+        },
+        "safe": {
+          "q": "Is my file safe?",
+          "a": "Your original file is deleted as soon as the conversion finishes, and the converted file after 1 hour. Files are never shared, and the code that handles them is open source."
+        }
+      }
     }
   }
 }

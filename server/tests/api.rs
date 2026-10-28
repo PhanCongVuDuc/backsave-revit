@@ -4,11 +4,11 @@ use axum::Router;
 use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::{Method, Request, StatusCode};
-use backsave_server::clock::ManualClock;
-use backsave_server::config::Config;
-use backsave_server::jobs::JobId;
-use backsave_server::worker::spawn_workers;
-use backsave_server::{AppState, app};
+use revit_downgrade_server::clock::ManualClock;
+use revit_downgrade_server::config::Config;
+use revit_downgrade_server::jobs::JobId;
+use revit_downgrade_server::worker::spawn_workers;
+use revit_downgrade_server::{AppState, app};
 use serde_json::{Value, json};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -537,7 +537,7 @@ async fn full_disk_budget_is_503_server_full() {
     ));
     let mut state = common::test_state(dir.path(), clock.clone());
     state.store = Arc::new(
-        backsave_server::jobs::JobStore::new(dir.path().to_path_buf(), clock).with_disk_budget(100),
+        revit_downgrade_server::jobs::JobStore::new(dir.path().to_path_buf(), clock).with_disk_budget(100),
     );
     let f = Fixture {
         app: app(state.clone()),

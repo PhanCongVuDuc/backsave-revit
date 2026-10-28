@@ -303,7 +303,7 @@ mod tests {
             chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap(),
         ));
         let config =
-            Config::from_lookup(|k| (k == "BACKSAVE_ENGINE").then(|| "x".to_string())).unwrap();
+            Config::from_lookup(|k| (k == "REVIT_DOWNGRADE_ENGINE").then(|| "x".to_string())).unwrap();
         let state = AppState {
             store: Arc::new(JobStore::new(dir.path().to_path_buf(), clock.clone())),
             engine: Arc::new(Engine::new("x")),

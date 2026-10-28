@@ -7,7 +7,7 @@ import { safeStorage } from '@/shared/storage/safeStorage';
 import { createAppI18n } from './i18n';
 import { createAppRouter } from './router';
 
-export function createBacksaveApp() {
+export function createRevitDowngradeApp() {
   const app = createApp(App);
   app.use(createPinia());
   app.use(createAppRouter());

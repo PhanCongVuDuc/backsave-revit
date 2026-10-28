@@ -1,8 +1,8 @@
 # Caddy sets X-Forwarded-For to the address of the connecting client and drops any
 # value the client sent (unless `trusted_proxies` is configured here, which it is not).
 # The server takes the client address from that header for its per-IP limits
-# (BACKSAVE_TRUST_PROXY=true in docker-compose.yml).
-{$BACKSAVE_DOMAIN:localhost} {
+# (REVIT_DOWNGRADE_TRUST_PROXY=true in docker-compose.yml).
+{$REVIT_DOWNGRADE_DOMAIN:localhost} {
 	encode gzip
 
 	# Uploads are resumable (tus) and sent in chunks of at most 50 MiB, but allow the

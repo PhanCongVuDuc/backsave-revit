@@ -128,7 +128,7 @@ describe('readRevitFileInfo', () => {
     await expect(readRevitFileInfo(file)).resolves.toEqual({ kind: 'rvt', year: 2026 });
   });
 
-  const samples = process.env.BACKSAVE_SAMPLES ?? '';
+  const samples = process.env.REVIT_DOWNGRADE_SAMPLES ?? '';
 
   it.skipIf(samples === '')('real_samples_2023_2027', async () => {
     const names = (await readdir(samples)).filter((name) => /_(\d{4})\.(?:rvt|rte|rfa|rft)$/i.test(name));
