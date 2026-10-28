@@ -10,6 +10,7 @@
   },
   "footer": {
     "author": "Author",
+    "authorAbout": "an engineer from Vietnam",
     "trademark": "Revit is a registered trademark of Autodesk, Inc. Backsave is not affiliated with or endorsed by Autodesk.",
     "openSource": "Backsave is open source — you can check exactly how your files are handled: {repo}"
   }

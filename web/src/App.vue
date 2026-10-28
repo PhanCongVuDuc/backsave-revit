@@ -48,7 +48,7 @@ const { t, locale } = useI18n();
         </template>
       </i18n-t>
       <p class="author">
-        {{ t('footer.author') }}: {{ AUTHOR_NAME }} · <a :href="`mailto:${CONTACT_EMAIL}`">{{ CONTACT_EMAIL }}</a> ·
+        {{ t('footer.author') }}: {{ AUTHOR_NAME }}, {{ t('footer.authorAbout') }} · <a :href="`mailto:${CONTACT_EMAIL}`">{{ CONTACT_EMAIL }}</a> ·
         <a :href="LINKEDIN_URL" target="_blank" rel="noopener">LinkedIn</a> ·
         <a :href="GITHUB_PROFILE_URL" target="_blank" rel="noopener">GitHub</a>
       </p>
