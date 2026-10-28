@@ -12,6 +12,7 @@
   "footer": {
     "author": "Author",
     "authorAbout": "an engineer from Vietnam",
+    "thanks": "Thanks to {name} for the help and support.",
     "trademark": "Revit is a registered trademark of Autodesk, Inc. Revit Downgrade is not affiliated with or endorsed by Autodesk.",
     "openSource": "Revit Downgrade is open source — you can check exactly how your files are handled: {repo}"
   }

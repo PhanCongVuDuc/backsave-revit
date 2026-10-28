@@ -10,6 +10,8 @@ import {
   LINKEDIN_URL,
   REPO_LABEL,
   REPO_URL,
+  THANKS_NAME,
+  THANKS_URL,
 } from '@/shared/contact/contact';
 
 const { t, locale } = useI18n();
@@ -54,6 +56,11 @@ const { t, locale } = useI18n();
         <a :href="LINKEDIN_URL" target="_blank" rel="noopener">LinkedIn</a> ·
         <a :href="GITHUB_PROFILE_URL" target="_blank" rel="noopener">GitHub</a>
       </p>
+      <i18n-t keypath="footer.thanks" tag="p" scope="global">
+        <template #name>
+          <a :href="THANKS_URL" target="_blank" rel="noopener">{{ THANKS_NAME }}</a>
+        </template>
+      </i18n-t>
       <p>{{ t('footer.trademark') }}</p>
     </footer>
   </div>

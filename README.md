@@ -58,6 +58,10 @@ Made by Phan Cong Vu Duc ([LinkedIn](https://www.linkedin.com/in/phancongvuduc/)
 Questions or deletion requests: phancongvuduc@gmail.com or
 [GitHub issues](https://github.com/PhanCongVuDuc/revit-downgrade/issues).
 
+## Thanks
+
+Thanks to [Cazorlas](https://github.com/Cazorlas) for the help and support.
+
 ## License
 
 [MIT](LICENSE).
