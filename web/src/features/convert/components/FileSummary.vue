@@ -75,10 +75,6 @@ const { t } = useI18n();
   width: 100%;
 }
 
-.row :deep(.base-select) {
-  flex: 1;
-}
-
 .file-summary :deep(.is-block) {
   width: 100%;
 }

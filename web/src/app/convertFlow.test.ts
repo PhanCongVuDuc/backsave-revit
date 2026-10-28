@@ -136,7 +136,7 @@ describe('conversion card', () => {
     await settle();
     expect(screen.getByText(/^Revit 2026 · Project · /)).toBeInTheDocument();
     expect(screen.getByText('tower.rvt')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Target Revit version' })).toHaveValue('2025');
+    expect(screen.getByRole('radio', { name: 'Revit 2025' })).toBeChecked();
     expect(
       screen.getByText('Your file is only sent when you press Downgrade. It is deleted after 1 hour.'),
     ).toBeInTheDocument();
@@ -294,9 +294,9 @@ describe('failure report', () => {
     const consent = screen.getByRole('checkbox');
     expect(consent).not.toBeChecked();
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
-    expect(screen.getByLabelText(/^Let Revit Downgrade keep this file for up to 30 days to find and fix the problem\./)).toBe(
-      consent,
-    );
+    expect(
+      screen.getByLabelText(/^Let Revit Downgrade keep this file for up to 30 days to find and fix the problem\./),
+    ).toBe(consent);
   });
 
   it('report_sent_only_after_tick_and_send', async () => {
@@ -481,12 +481,30 @@ describe('reopening', () => {
   });
 });
 
+describe('version buttons', () => {
+  it('picks a version with one click', async () => {
+    await open();
+    await user().upload(screen.getByLabelText('Revit file'), revitFile());
+    await settle();
+    await user().click(screen.getByText('Revit 2024'));
+    expect(screen.getByRole('radio', { name: 'Revit 2024' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Revit 2025' })).not.toBeChecked();
+  });
+
+  it("picks the target of the pair's page the file was added on", async () => {
+    await open('/revit-2026-to-2024');
+    await user().upload(screen.getByLabelText('Revit file'), revitFile());
+    await settle();
+    expect(screen.getByRole('radio', { name: 'Revit 2024' })).toBeChecked();
+  });
+});
+
 describe('keyboard and drag behaviour', () => {
   it('moves focus into the card when the step changes', async () => {
     await open();
     await user().upload(screen.getByLabelText('Revit file'), revitFile());
     await settle();
-    expect(screen.getByRole('combobox', { name: 'Target Revit version' })).toHaveFocus();
+    expect(screen.getByRole('radio', { name: 'Revit 2025' })).toHaveFocus();
   });
 
   it('stops the browser opening a file dropped outside the zone, only while the zone is shown', async () => {

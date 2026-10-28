@@ -22,6 +22,7 @@ const { t, locale } = useI18n();
         Revit <span class="light">Downgrade</span>
       </RouterLink>
       <nav class="links">
+        <RouterLink :to="{ name: 'guides' }">{{ t('nav.guides') }}</RouterLink>
         <RouterLink :to="{ name: 'about' }">{{ t('nav.about') }}</RouterLink>
         <a :href="REPO_URL" rel="noopener">{{ t('nav.source') }}</a>
         <span class="languages" role="group" :aria-label="t('app.language')">
@@ -48,7 +49,8 @@ const { t, locale } = useI18n();
         </template>
       </i18n-t>
       <p class="author">
-        {{ t('footer.author') }}: {{ AUTHOR_NAME }}, {{ t('footer.authorAbout') }} · <a :href="`mailto:${CONTACT_EMAIL}`">{{ CONTACT_EMAIL }}</a> ·
+        {{ t('footer.author') }}: {{ AUTHOR_NAME }}, {{ t('footer.authorAbout') }} ·
+        <a :href="`mailto:${CONTACT_EMAIL}`">{{ CONTACT_EMAIL }}</a> ·
         <a :href="LINKEDIN_URL" target="_blank" rel="noopener">LinkedIn</a> ·
         <a :href="GITHUB_PROFILE_URL" target="_blank" rel="noopener">GitHub</a>
       </p>

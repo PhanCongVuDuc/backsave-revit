@@ -3,6 +3,53 @@
     "title": "Hạ phiên bản file Revit",
     "lead": "Mở model mới bằng Revit cũ. Miễn phí. File tự xoá sau 1 giờ.",
     "versions": "Revit 2027 · 2026 · 2025 · 2024 → xuống tới Revit 2023",
+    "pageTitle": "Hạ phiên bản file Revit online (2027 → 2023), miễn phí {'|'} Revit Downgrade",
+    "description": "Hạ phiên bản file Revit miễn phí: chuyển file Revit 2027, 2026, 2025, 2024 (.rvt, .rfa, .rte, .rft) về bản cũ hơn, xuống tới Revit 2023. Không cần cài đặt. File tự xoá sau 1 giờ.",
+    "pairPage": {
+      "title": "Hạ file Revit {from} về Revit {to}",
+      "pageTitle": "Hạ file Revit {from} về {to} online, miễn phí {'|'} Revit Downgrade",
+      "description": "Chuyển file Revit {from} (.rvt, .rfa, .rte, .rft) để mở được bằng Revit {to}. Miễn phí, không cần cài đặt, file tự xoá sau 1 giờ."
+    },
+    "guide": {
+      "stepsTitle": "Cách hạ phiên bản file Revit",
+      "steps": {
+        "add": {
+          "title": "Thêm file",
+          "body": "Chọn hoặc kéo thả file .rvt, .rfa, .rte, .rft."
+        },
+        "pick": {
+          "title": "Chọn phiên bản",
+          "body": "Bấm vào phiên bản Revit bạn cần mở file."
+        },
+        "download": {
+          "title": "Tải về",
+          "body": "Tải file đã hạ và mở bằng Revit bản cũ."
+        }
+      },
+      "highlightsTitle": "Vì sao dùng Revit Downgrade",
+      "highlights": {
+        "free": {
+          "title": "Miễn phí",
+          "body": "Không cần tài khoản, không trả tiền."
+        },
+        "noInstall": {
+          "title": "Không cần cài",
+          "body": "Chạy ngay trên trình duyệt."
+        },
+        "deleted": {
+          "title": "Xoá sau 1 giờ",
+          "body": "File không bị giữ hay chia sẻ."
+        },
+        "openSource": {
+          "title": "Mã nguồn mở",
+          "body": "Ai cũng kiểm tra được code."
+        }
+      }
+    },
+    "pairs": {
+      "title": "Các phép hạ phổ biến",
+      "link": "Revit {from} về {to}"
+    },
     "status": {
       "pick": "Chọn một file",
       "ready": "Sẵn sàng để hạ",

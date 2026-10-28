@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { watchEffect } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { RouterLink } from 'vue-router';
 
@@ -10,10 +11,15 @@ import {
   REPO_LABEL,
   REPO_URL as REPO,
 } from '@/shared/contact/contact';
+import { setPageMeta } from '@/shared/seo/pageMeta';
 
 const ROWS = ['unfinished', 'cancelled', 'original', 'failed', 'output', 'report'] as const;
 
 const { t } = useI18n();
+
+watchEffect(() => {
+  setPageMeta({ title: t('about.pageTitle'), description: t('about.intro'), path: '/how-it-works' });
+});
 </script>
 
 <template>

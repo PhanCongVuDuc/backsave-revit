@@ -4,6 +4,7 @@
     "language": "Language"
   },
   "nav": {
+    "guides": "Guides",
     "about": "How your files are handled",
     "source": "Source code",
     "home": "Revit Downgrade home"

@@ -3,6 +3,53 @@
     "title": "Downgrade a Revit file",
     "lead": "Open a newer model in an older Revit. Free. Your file is deleted after 1 hour.",
     "versions": "Revit 2027 · 2026 · 2025 · 2024 → down to Revit 2023",
+    "pageTitle": "Downgrade Revit Files Online (2027 → 2023), Free {'|'} Revit Downgrade",
+    "description": "Free online Revit downgrade: save a Revit 2027, 2026, 2025 or 2024 file (.rvt, .rfa, .rte, .rft) to an older version, down to Revit 2023. Nothing to install. Files are deleted after 1 hour.",
+    "pairPage": {
+      "title": "Downgrade Revit {from} to Revit {to}",
+      "pageTitle": "Downgrade Revit {from} to {to} Online, Free {'|'} Revit Downgrade",
+      "description": "Convert a Revit {from} file (.rvt, .rfa, .rte, .rft) so it opens in Revit {to}. Free, nothing to install, files are deleted after 1 hour."
+    },
+    "guide": {
+      "stepsTitle": "How to downgrade a Revit file",
+      "steps": {
+        "add": {
+          "title": "Add your file",
+          "body": "Choose or drop a .rvt, .rfa, .rte or .rft file."
+        },
+        "pick": {
+          "title": "Pick a version",
+          "body": "Click the Revit version you need to open it in."
+        },
+        "download": {
+          "title": "Download",
+          "body": "Get the converted file and open it in the older Revit."
+        }
+      },
+      "highlightsTitle": "Why use Revit Downgrade",
+      "highlights": {
+        "free": {
+          "title": "Free",
+          "body": "No account, no payment."
+        },
+        "noInstall": {
+          "title": "Nothing to install",
+          "body": "Works in your browser."
+        },
+        "deleted": {
+          "title": "Deleted after 1 hour",
+          "body": "Your files are never kept or shared."
+        },
+        "openSource": {
+          "title": "Open source",
+          "body": "Anyone can check the code."
+        }
+      }
+    },
+    "pairs": {
+      "title": "Popular conversions",
+      "link": "Revit {from} to {to}"
+    },
     "status": {
       "pick": "Choose a file",
       "ready": "Ready to downgrade",

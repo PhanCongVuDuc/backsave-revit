@@ -1,6 +1,7 @@
 {
   "about": {
     "title": "Cách xử lý file của bạn",
+    "pageTitle": "Cách xử lý file của bạn {'|'} Revit Downgrade",
     "intro": "Revit Downgrade chuyển file Revit về phiên bản Revit cũ hơn. Trang này nói file của bạn được xử lý thế nào và khi nào bị xoá.",
     "sent": {
       "title": "Khi nào file được gửi",

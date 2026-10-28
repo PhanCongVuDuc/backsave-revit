@@ -1,17 +1,52 @@
 <script setup lang="ts">
-import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 
-import BaseSelect from '@/shared/ui/BaseSelect.vue';
-
-const props = defineProps<{ targets: number[] }>();
+defineProps<{ targets: number[] }>();
 const model = defineModel<number>({ required: true });
 const { t } = useI18n();
-const options = computed(() =>
-  props.targets.map((year) => ({ value: year, label: t('convert.target.option', { year }) })),
-);
 </script>
 
 <template>
-  <BaseSelect v-model="model" :options="options" :label="t('convert.target.label')" />
+  <fieldset class="target-picker">
+    <legend class="visually-hidden">{{ t('convert.target.label') }}</legend>
+    <label v-for="year in targets" :key="year" class="year" :class="{ 'is-on': model === year }">
+      <input v-model="model" class="visually-hidden" type="radio" name="target-year" :value="year" />
+      {{ t('convert.target.option', { year }) }}
+    </label>
+  </fieldset>
 </template>
+
+<style scoped>
+.target-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.year {
+  cursor: pointer;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-card);
+  font-weight: 600;
+}
+
+.year:hover {
+  border-color: var(--color-primary);
+}
+
+.year.is-on {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-primary-text);
+}
+
+.year:has(input:focus-visible) {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+</style>

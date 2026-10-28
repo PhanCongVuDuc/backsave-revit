@@ -45,6 +45,36 @@ describe('router', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(convertEn.convert.title);
   });
 
+  it('renders a page of its own for each downgrade, titled for search', async () => {
+    const router = await open('/revit-2026-to-2024');
+    expect(router.currentRoute.value.name).toBe('pair');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Downgrade Revit 2026 to Revit 2024');
+    expect(document.title).toBe('Downgrade Revit 2026 to 2024 Online, Free | Revit Downgrade');
+  });
+
+  it('sends a downgrade the engine does not do back to the start', async () => {
+    const router = await open('/revit-2023-to-2026');
+    expect(router.currentRoute.value.path).toBe('/');
+  });
+
+  it('lists the guides and opens one', async () => {
+    const router = await open('/guides');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Guides');
+    await router.push('/guides/revit-version-compatibility');
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent(
+      'Revit version compatibility: which Revit opens which file',
+    );
+    expect(
+      screen.getByText('Revit 2023 opens files from Revit 2023 and earlier, but not 2024 to 2027.'),
+    ).toBeInTheDocument();
+    expect(document.title).toBe('Revit version compatibility: which Revit opens which file | Revit Downgrade');
+  });
+
+  it('sends an unknown guide to the list of guides', async () => {
+    const router = await open('/guides/no-such-guide');
+    expect(router.currentRoute.value.name).toBe('guides');
+  });
+
   it('sends an unknown address back to the start', async () => {
     const router = await open('/no/such/page');
     expect(router.currentRoute.value.name).toBe('convert');

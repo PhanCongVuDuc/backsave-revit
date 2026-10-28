@@ -5,6 +5,8 @@ import aboutEn from '@/features/about/locales/en.json';
 import aboutVi from '@/features/about/locales/vi.json';
 import convertEn from '@/features/convert/locales/en.json';
 import convertVi from '@/features/convert/locales/vi.json';
+import guidesEn from '@/features/guides/locales/en.json';
+import guidesVi from '@/features/guides/locales/vi.json';
 import en from '@/shared/locales/en.json';
 import vi from '@/shared/locales/vi.json';
 
@@ -44,7 +46,10 @@ export function createAppI18n(browserLanguage: string, storage: LocaleStorage) {
     legacy: false,
     locale: pickLocale(browserLanguage, readRemembered(storage)),
     fallbackLocale: 'en',
-    messages: { en: { ...en, ...convertEn, ...aboutEn }, vi: { ...vi, ...convertVi, ...aboutVi } },
+    messages: {
+      en: { ...en, ...convertEn, ...aboutEn, ...guidesEn },
+      vi: { ...vi, ...convertVi, ...aboutVi, ...guidesVi },
+    },
   });
   const reflectLocale = (locale: string) => {
     document.documentElement.lang = locale;

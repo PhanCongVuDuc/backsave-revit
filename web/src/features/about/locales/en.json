@@ -1,6 +1,7 @@
 {
   "about": {
     "title": "How your files are handled",
+    "pageTitle": "How your files are handled {'|'} Revit Downgrade",
     "intro": "Revit Downgrade converts a Revit file to an older Revit version. This page says what happens to your file and when it is deleted.",
     "sent": {
       "title": "When your file is sent",
