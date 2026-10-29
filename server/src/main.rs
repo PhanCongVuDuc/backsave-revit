@@ -1,9 +1,10 @@
 use revit_downgrade_server::cleanup::{spawn_cleanup, wipe_jobs_dir};
-use revit_downgrade_server::clock::SystemClock;
+use revit_downgrade_server::clock::{Clock, SystemClock};
 use revit_downgrade_server::config::Config;
 use revit_downgrade_server::engine::Engine;
 use revit_downgrade_server::jobs::JobStore;
 use revit_downgrade_server::reports::Reports;
+use revit_downgrade_server::stats::Stats;
 use revit_downgrade_server::worker::spawn_workers;
 use revit_downgrade_server::{AppState, app};
 use std::net::SocketAddr;
@@ -41,10 +42,12 @@ async fn run() -> anyhow::Result<()> {
     tracing::info!(pairs = pairs.len(), "engine ready");
 
     let clock = Arc::new(SystemClock);
+    // Usage statistics live outside the jobs and reports directories, so no cleanup touches them.
+    let stats = Arc::new(Stats::open(config.data.join("stats"), clock.now()));
     let store = Arc::new(
         JobStore::new(config.data.clone(), clock.clone()).with_disk_budget(config.disk_budget),
     );
-    spawn_workers(config.workers, store.clone(), engine.clone());
+    spawn_workers(config.workers, store.clone(), engine.clone(), stats.clone());
     let reports = Arc::new(Reports::new(config.data.join("reports")));
     spawn_cleanup(store.clone(), reports.clone(), clock.clone());
     let engine_version = Arc::new(engine.version().await);
@@ -57,6 +60,7 @@ async fn run() -> anyhow::Result<()> {
         pairs: Arc::new(pairs),
         clock,
         reports,
+        stats,
         engine_version,
     };
     let listener = tokio::net::TcpListener::bind(listen)

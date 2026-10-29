@@ -14,6 +14,7 @@ import GuideSections from './components/GuideSections.vue';
 import PairLinks from './components/PairLinks.vue';
 import ProgressPanel from './components/ProgressPanel.vue';
 import ResultPanel from './components/ResultPanel.vue';
+import UsageStats from './components/UsageStats.vue';
 import { formatBytes } from './format';
 import { pairPath, type Pair } from './pairs';
 import { useConvertStore } from './stores/convertStore';
@@ -212,6 +213,8 @@ onMounted(() => {
         @choose-another="store.cancel"
       />
     </div>
+    <!-- Outside the steps, so it is fetched once per page load and stays put while a file converts. -->
+    <UsageStats />
     <template v-if="store.phase === 'pick'">
       <GuideSections />
       <FaqSection />

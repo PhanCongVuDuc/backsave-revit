@@ -42,6 +42,10 @@
       "title": "Cookie và theo dõi",
       "body": "Revit Downgrade không đặt cookie theo dõi và không có quảng cáo. Lượt xem trang được đếm bằng Cloudflare Web Analytics, không dùng cookie và không theo dõi bạn qua các trang web khác. Trình duyệt chỉ nhớ ngôn ngữ bạn chọn và danh sách các lần tải lên chưa xong (tên, dung lượng, ngày của file kèm mã phiên chuyển đổi), để khi chọn lại đúng file đó thì tải tiếp được. Danh sách được xoá khi tải lên xong và sau 6 giờ."
     },
+    "stats": {
+      "title": "Thống kê sử dụng",
+      "body": "Máy chủ cộng dồn các con số: số lần hạ file thành công, số lần lỗi, số file lỗi được gửi để xem xét, và số người khác nhau đã hạ file. Mỗi người được nhận ra bằng giá trị băm một chiều có khoá bí mật của địa chỉ mạng (địa chỉ IPv6 được gom theo mạng /64), nên con số chỉ gần đúng: nhiều người dùng chung một mạng được tính là một, một người đổi mạng có thể bị tính hai lần. Máy chủ không lưu địa chỉ thật, tên file hay nội dung file cho việc này. Các con số tổng được hiện công khai trên trang chính."
+    },
     "logs": {
       "title": "Nhật ký máy chủ",
       "body": "Nhật ký máy chủ không bao giờ chứa tên file hay nội dung file."

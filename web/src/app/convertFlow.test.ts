@@ -31,6 +31,7 @@ vi.mock('@/api', async (importOriginal) => {
     deleteJob: vi.fn(),
     sendReport: vi.fn(),
     uploadFile: vi.fn(),
+    getStats: vi.fn().mockResolvedValue(null),
   };
 });
 

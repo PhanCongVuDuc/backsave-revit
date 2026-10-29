@@ -443,13 +443,20 @@ impl JobStore {
         }
     }
 
-    pub fn finish(&self, id: &JobId, outcome: Result<Vec<DroppedElement>, (ErrorKind, String)>) {
-        self.finish_with(id, outcome, 0);
+    /// Moves a running job to done or failed. Returns `true` only when that move happened: a job
+    /// that is gone or no longer running (cancelled, say) is left alone and gives `false`.
+    pub fn finish(
+        &self,
+        id: &JobId,
+        outcome: Result<Vec<DroppedElement>, (ErrorKind, String)>,
+    ) -> bool {
+        self.finish_with(id, outcome, 0)
     }
 
-    /// Marks a running job done, recording the size of its converted file.
-    pub fn finish_done(&self, id: &JobId, dropped: Vec<DroppedElement>, output_size: u64) {
-        self.finish_with(id, Ok(dropped), output_size);
+    /// Marks a running job done, recording the size of its converted file. Returns `true` as
+    /// `finish` does.
+    pub fn finish_done(&self, id: &JobId, dropped: Vec<DroppedElement>, output_size: u64) -> bool {
+        self.finish_with(id, Ok(dropped), output_size)
     }
 
     fn finish_with(
@@ -457,12 +464,14 @@ impl JobStore {
         id: &JobId,
         outcome: Result<Vec<DroppedElement>, (ErrorKind, String)>,
         output_size: u64,
-    ) {
+    ) -> bool {
         let now = self.clock.now();
         let mut g = self.lock();
-        let Some(j) = g.jobs.get_mut(id) else { return };
+        let Some(j) = g.jobs.get_mut(id) else {
+            return false;
+        };
         if j.state != JobState::Running {
-            return;
+            return false;
         }
         j.finished_at = Some(now);
         match outcome {
@@ -478,6 +487,7 @@ impl JobStore {
                 j.expires_at = Some(now + Duration::minutes(FAILED_RETENTION_MIN));
             }
         }
+        true
     }
 
     /// Cancels a job that has not finished yet and signals its token. The result says, decided
@@ -845,7 +855,7 @@ mod tests {
         s.mark_uploaded(&j.id);
         let taken = s.take_next().unwrap();
         assert_eq!(s.cancel(&j.id), CancelOutcome::WasRunning);
-        s.finish(&j.id, Ok(vec![]));
+        assert!(!s.finish(&j.id, Ok(vec![])));
         let after = s.get(&j.id).unwrap();
         assert_eq!(after.state, JobState::Cancelled);
         assert!(taken.cancel.is_cancelled());
@@ -973,7 +983,7 @@ mod tests {
             reason: crate::model::DropReason::NoRule,
             cascade_from: None,
         };
-        s.finish(&a.id, Ok(vec![d.clone()]));
+        assert!(s.finish(&a.id, Ok(vec![d.clone()])));
         let j = s.get(&a.id).unwrap();
         assert_eq!(j.state, JobState::Done);
         assert_eq!(j.dropped, vec![d]);
@@ -983,7 +993,9 @@ mod tests {
         let b = s.create(req(), ip(1), &pairs()).unwrap();
         s.mark_uploaded(&b.id);
         s.take_next().unwrap();
-        s.finish(&b.id, Err((ErrorKind::Corrupt, "bad".into())));
+        assert!(s.finish(&b.id, Err((ErrorKind::Corrupt, "bad".into()))));
+        // A second finish on a job that is no longer running changes nothing.
+        assert!(!s.finish(&b.id, Ok(vec![])));
         let j = s.get(&b.id).unwrap();
         assert_eq!(j.state, JobState::Failed);
         assert_eq!(j.error.as_ref().unwrap().kind, ErrorKind::Corrupt);

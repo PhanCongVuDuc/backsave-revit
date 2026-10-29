@@ -4,7 +4,7 @@ import { expect, revitFile, test } from './fixtures';
 
 async function convert(page: Page, path: string) {
   await page.goto('/');
-  await page.getByLabel('Revit file').setInputFiles(path);
+  await page.getByLabel('Revit file', { exact: true }).setInputFiles(path);
   await page.getByRole('button', { name: 'Downgrade' }).click();
 }
 

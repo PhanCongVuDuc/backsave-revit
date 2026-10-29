@@ -10,10 +10,15 @@ import convertEn from '@/features/convert/locales/en.json';
 import { createAppI18n } from './i18n';
 import { createAppRouter } from './router';
 
-// The convert view asks the server about a remembered or linked job; here the server knows nothing.
+// The convert view asks the server about a remembered or linked job and for the usage totals; here the server knows
+// nothing.
 vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api')>();
-  return { ...actual, getJob: vi.fn().mockRejectedValue(new actual.ApiError(404, 'not_found', 'unknown')) };
+  return {
+    ...actual,
+    getJob: vi.fn().mockRejectedValue(new actual.ApiError(404, 'not_found', 'unknown')),
+    getStats: vi.fn().mockResolvedValue(null),
+  };
 });
 
 async function open(path: string) {

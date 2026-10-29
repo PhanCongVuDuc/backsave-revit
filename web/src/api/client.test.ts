@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError, createJob, deleteJob, getDropped, getInfo, getJob, sendReport, uploadFile } from './index';
+import { ApiError, createJob, deleteJob, getDropped, getInfo, getJob, getStats, sendReport, uploadFile } from './index';
 import { shouldRetryUpload } from './upload';
 
 interface FakeUpload {
@@ -185,6 +185,44 @@ describe('api client', () => {
       `POST /api/jobs/${id}/report`,
     ]);
     expect(JSON.parse(fetchMock.mock.calls[2]?.[1]?.body as string)).toEqual({ consent: true });
+  });
+});
+
+describe('getStats', () => {
+  const totals = { since: '2026-10-29', people: 7, succeeded: 10, failed: 3, contributed: 1 };
+
+  it('reads /api/stats', async () => {
+    fetchMock.mockResolvedValueOnce(json(200, totals));
+    await expect(getStats()).resolves.toEqual(totals);
+    expect(fetchMock).toHaveBeenCalledWith('/api/stats', expect.objectContaining({ method: 'GET' }));
+  });
+
+  it('gives null when the statistics are unavailable', async () => {
+    fetchMock.mockResolvedValueOnce(
+      json(503, { error: { code: 'stats_unavailable', message: 'Unavailable.', retry_after_s: null } }),
+    );
+    await expect(getStats()).resolves.toBeNull();
+  });
+
+  it('gives null on a network failure', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await expect(getStats()).resolves.toBeNull();
+  });
+
+  it('gives null for a body that is not JSON', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('<html>', { status: 200 }));
+    await expect(getStats()).resolves.toBeNull();
+  });
+
+  it.each([
+    ['a missing field', { since: '2026-10-29', people: 7, succeeded: 10, failed: 3 }],
+    ['a count that is not a number', { ...totals, succeeded: '10' }],
+    ['a negative count', { ...totals, failed: -1 }],
+    ['a date that is not YYYY-MM-DD', { ...totals, since: 'yesterday' }],
+    ['null', null],
+  ])('gives null for %s', async (_case, body) => {
+    fetchMock.mockResolvedValueOnce(json(200, body));
+    await expect(getStats()).resolves.toBeNull();
   });
 });
 

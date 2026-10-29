@@ -3,6 +3,15 @@
     "title": "Downgrade a Revit file",
     "lead": "Open a newer model in an older Revit. Free. Your file is deleted after 1 hour.",
     "versions": "Revit 2027 · 2026 · 2025 · 2024 → down to Revit 2023",
+    "stats": {
+      "label": "Usage so far",
+      "people": "people have used it",
+      "succeeded": "files downgraded",
+      "failed": "files failed",
+      "contributed": "failed files sent to help fix them",
+      "since": "Counted since {date}",
+      "help": "Downgrading Revit files is hard and takes a lot of real data to get right. Every failed file you send helps us fix bugs and keep improving the tool."
+    },
     "pageTitle": "Downgrade Revit Files Online (2027 → 2023), Free {'|'} Revit Downgrade",
     "description": "Free online Revit downgrade: save a Revit 2027, 2026, 2025 or 2024 file (.rvt, .rfa, .rte, .rft) to an older version, down to Revit 2023. Nothing to install. Files are deleted after 1 hour.",
     "pairPage": {

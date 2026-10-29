@@ -6,6 +6,7 @@ export {
   getDropped,
   getInfo,
   getJob,
+  getStats,
   jobFileUrl,
   jobUploadUrl,
   sendReport,

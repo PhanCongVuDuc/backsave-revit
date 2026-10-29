@@ -1,4 +1,5 @@
-//! JSON API under `/api`: server info, job creation, status, downloads and deletion.
+//! JSON API under `/api`: server info, usage statistics, job creation, status, downloads and
+//! deletion.
 
 use crate::AppState;
 use crate::config::IpCidr;
@@ -20,10 +21,13 @@ use tokio_util::io::ReaderStream;
 
 const MAX_NAME_CHARS: usize = 255;
 const NO_STORE: &str = "no-store";
+/// The public totals may be up to a minute old in browsers and proxies.
+const STATS_CACHE: &str = "public, max-age=60";
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/info", get(info))
+        .route("/api/stats", get(stats))
         .route("/api/jobs", post(create_job))
         .route("/api/jobs/{id}", get(get_job).delete(delete_job))
         .route("/api/jobs/{id}/file", get(download_file))
@@ -77,6 +81,25 @@ async fn info(State(s): State<AppState>) -> Json<serde_json::Value> {
         "pairs": &*s.pairs,
         "version": env!("CARGO_PKG_VERSION"),
     }))
+}
+
+/// Public usage totals, served from memory. While the statistics are unavailable the answer is
+/// 503, never zeros.
+async fn stats(State(s): State<AppState>) -> Response {
+    match s.stats.snapshot() {
+        Some(snapshot) => ([(header::CACHE_CONTROL, STATS_CACHE)], Json(snapshot)).into_response(),
+        None => {
+            let mut resp = ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "stats_unavailable",
+                "Usage statistics are not available.",
+            )
+            .into_response();
+            resp.headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static(NO_STORE));
+            resp
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -380,12 +403,18 @@ async fn report_job(
     };
     let input = s.store.input_path(&job);
     let log = s.store.log_path(&job);
-    let (reports, version, now) = (s.reports.clone(), s.engine_version.clone(), s.clock.now());
+    let (reports, stats, version, now) = (
+        s.reports.clone(),
+        s.stats.clone(),
+        s.engine_version.clone(),
+        s.clock.now(),
+    );
     let made = {
         let job = job.clone();
         tokio::task::spawn_blocking(move || {
             let made = reports.create(&job, &input, &log, &version, now);
             if made.is_ok() {
+                stats.record_contribution();
                 reports.enforce(now);
             }
             made

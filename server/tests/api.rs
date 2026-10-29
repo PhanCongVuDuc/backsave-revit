@@ -22,7 +22,11 @@ struct Fixture {
 }
 
 fn setup_with(edit: impl FnOnce(&mut Config)) -> Fixture {
-    let dir = tempfile::tempdir().unwrap();
+    setup_in(tempfile::tempdir().unwrap(), edit)
+}
+
+/// Builds the app on an existing data directory, so files can be placed there first.
+fn setup_in(dir: tempfile::TempDir, edit: impl FnOnce(&mut Config)) -> Fixture {
     let clock = Arc::new(ManualClock::new(
         chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap(),
     ));
@@ -39,7 +43,12 @@ fn setup() -> Fixture {
 }
 
 fn start_workers(f: &Fixture) {
-    spawn_workers(1, f.state.store.clone(), f.state.engine.clone());
+    spawn_workers(
+        1,
+        f.state.store.clone(),
+        f.state.engine.clone(),
+        f.state.stats.clone(),
+    );
 }
 
 fn peer(last: u8) -> SocketAddr {
@@ -537,7 +546,8 @@ async fn full_disk_budget_is_503_server_full() {
     ));
     let mut state = common::test_state(dir.path(), clock.clone());
     state.store = Arc::new(
-        revit_downgrade_server::jobs::JobStore::new(dir.path().to_path_buf(), clock).with_disk_budget(100),
+        revit_downgrade_server::jobs::JobStore::new(dir.path().to_path_buf(), clock)
+            .with_disk_budget(100),
     );
     let f = Fixture {
         app: app(state.clone()),
@@ -600,4 +610,201 @@ async fn responses_carry_security_headers() {
         assert_eq!(h["x-frame-options"], "DENY");
         assert_eq!(h["referrer-policy"], "no-referrer");
     }
+}
+
+fn post_report(id: &str) -> Request<Body> {
+    Request::builder()
+        .method(Method::POST)
+        .uri(format!("/api/jobs/{id}/report"))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"consent":true}"#))
+        .unwrap()
+}
+
+/// Sends a request as the given client behind the (trusted) proxy.
+async fn send_from(f: &Fixture, client: &str, mut req: Request<Body>) -> axum::response::Response {
+    req.headers_mut()
+        .insert("x-forwarded-for", client.parse().unwrap());
+    send(f, req).await
+}
+
+/// Runs one job to its final state, as the given client.
+async fn run_from(f: &Fixture, client: &str, mode: &str, want: &str) -> String {
+    let data = marker_bytes(mode, 2026);
+    let resp = send_from(
+        f,
+        client,
+        post_job(&job_body("House.rvt", data.len(), 2026, 2025)),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let id = body_json(resp).await["job_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    upload_all(f, &id, &data).await;
+    wait_for_state(f, &id, want).await;
+    id
+}
+
+async fn stats(f: &Fixture) -> Value {
+    let resp = send(f, get("/api/stats")).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    body_json(resp).await
+}
+
+/// Waits (up to 5 s) until `/api/stats` shows `field == want`: the count is written just after the
+/// job reaches its final state.
+async fn wait_for_stat(f: &Fixture, field: &str, want: u64) -> Value {
+    for _ in 0..100 {
+        let v = stats(f).await;
+        if v[field] == want {
+            return v;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("{field} never reached {want}: {}", stats(f).await);
+}
+
+#[tokio::test]
+async fn stats_new_server_is_zero_and_cacheable() {
+    let f = setup();
+    let resp = send(&f, get("/api/stats")).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.headers()["cache-control"], "public, max-age=60");
+    let since = f.state.clock.now().format("%Y-%m-%d").to_string();
+    assert_eq!(
+        body_json(resp).await,
+        json!({"since": since, "people": 0, "succeeded": 0, "failed": 0, "contributed": 0})
+    );
+}
+
+#[tokio::test]
+async fn stats_count_outcomes_and_reports() {
+    let f = setup();
+    start_workers(&f);
+    run_from(&f, "203.0.113.1", "ok", "done").await;
+    let done = run_from(&f, "203.0.113.1", "ok", "done").await;
+    let failed = run_from(&f, "203.0.113.1", "fail", "failed").await;
+    wait_for_stat(&f, "succeeded", 2).await;
+    let v = wait_for_stat(&f, "failed", 1).await;
+    assert_eq!(v["contributed"], 0);
+    assert_eq!(v["people"], 1);
+
+    let resp = send(&f, post_report(&failed)).await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    assert_eq!(stats(&f).await["contributed"], 1);
+
+    // Refused reports are not contributions.
+    let resp = send(&f, post_report(&failed)).await;
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    let resp = send(&f, post_report(&done)).await;
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    let v = stats(&f).await;
+    assert_eq!(
+        (&v["succeeded"], &v["failed"], &v["contributed"]),
+        (&json!(2), &json!(1), &json!(1))
+    );
+}
+
+#[tokio::test]
+async fn stats_skip_cancelled_job() {
+    let f = setup();
+    start_workers(&f);
+    let data = marker_bytes("hang", 2026);
+    let id = create(&f, "House.rvt", &data, 2026, 2025).await;
+    upload_all(&f, &id, &data).await;
+    wait_for_state(&f, &id, "running").await;
+    let resp = send(&f, delete(&format!("/api/jobs/{id}"))).await;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    let dir = f.dir.path().join("jobs").join(&id);
+    for _ in 0..100 {
+        if !dir.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(!dir.exists());
+    let v = stats(&f).await;
+    assert_eq!((&v["succeeded"], &v["failed"]), (&json!(0), &json!(0)));
+    assert_eq!(v["people"], 0);
+}
+
+#[tokio::test]
+async fn stats_people_by_forwarded_address() {
+    let f = setup_with(|c| c.trust_proxy = true);
+    start_workers(&f);
+    // IPv4 A converts 2 files, IPv4 B 1 file (it fails and is reported), and two addresses of
+    // one IPv6 /64 network convert one file each.
+    run_from(&f, "203.0.113.1", "ok", "done").await;
+    run_from(&f, "203.0.113.1", "ok", "done").await;
+    let failed = run_from(&f, "203.0.113.2", "fail", "failed").await;
+    run_from(&f, "2001:db8:1:2::1", "ok", "done").await;
+    run_from(&f, "2001:db8:1:2::2", "ok", "done").await;
+    wait_for_stat(&f, "failed", 1).await;
+    let resp = send_from(&f, "203.0.113.2", post_report(&failed)).await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let v = wait_for_stat(&f, "succeeded", 4).await;
+    assert_eq!(
+        (&v["people"], &v["failed"], &v["contributed"]),
+        (&json!(3), &json!(1), &json!(1))
+    );
+    let text = std::fs::read_to_string(f.dir.path().join("stats").join("stats.json")).unwrap();
+    assert!(!text.contains("203.0.113"));
+    assert!(!text.contains("2001:db8"));
+}
+
+#[tokio::test]
+async fn stats_corrupt_file_is_503_and_downgrades_still_work() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("stats")).unwrap();
+    let file = dir.path().join("stats").join("stats.json");
+    std::fs::write(&file, "{").unwrap();
+    let f = setup_in(dir, |_| {});
+    start_workers(&f);
+
+    let resp = send(&f, get("/api/stats")).await;
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(resp.headers()["cache-control"], "no-store");
+    let v = body_json(resp).await;
+    assert_eq!(v["error"]["code"], "stats_unavailable");
+    assert_eq!(v["error"]["message"], "Usage statistics are not available.");
+
+    let data = marker_bytes("ok", 2026);
+    run_to_done(&f, "House.rvt", &data, 2026, 2025).await;
+    let resp = send(&f, get("/api/stats")).await;
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(std::fs::read(&file).unwrap(), b"{");
+}
+
+#[tokio::test]
+async fn stats_survive_restarts() {
+    let f = setup_with(|c| c.trust_proxy = true);
+    start_workers(&f);
+    run_from(&f, "203.0.113.1", "ok", "done").await;
+    let failed = run_from(&f, "203.0.113.2", "fail", "failed").await;
+    wait_for_stat(&f, "failed", 1).await;
+    let resp = send(&f, post_report(&failed)).await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let before = wait_for_stat(&f, "succeeded", 1).await;
+    assert_eq!(before["contributed"], 1);
+    assert_eq!(before["people"], 2);
+
+    // Restart three times on the same data directory, the way the server starts.
+    let mut f = f;
+    for _ in 0..3 {
+        let Fixture { dir, .. } = f;
+        revit_downgrade_server::cleanup::wipe_jobs_dir(dir.path()).unwrap();
+        f = setup_in(dir, |c| c.trust_proxy = true);
+        assert_eq!(stats(&f).await, before);
+    }
+
+    // A client counted before the restarts: only the succeeded total moves, so the key held too.
+    start_workers(&f);
+    run_from(&f, "203.0.113.1", "ok", "done").await;
+    let after = wait_for_stat(&f, "succeeded", 2).await;
+    assert_eq!(after["failed"], before["failed"]);
+    assert_eq!(after["contributed"], before["contributed"]);
+    assert_eq!(after["people"], before["people"]);
+    assert_eq!(after["since"], before["since"]);
 }

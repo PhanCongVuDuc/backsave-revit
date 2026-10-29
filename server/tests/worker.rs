@@ -99,7 +99,12 @@ fn queue_job(
 }
 
 fn start(f: &Fixture, n: usize) {
-    spawn_workers(n, f.state.store.clone(), f.state.engine.clone());
+    spawn_workers(
+        n,
+        f.state.store.clone(),
+        f.state.engine.clone(),
+        f.state.stats.clone(),
+    );
 }
 
 #[tokio::test]
@@ -202,7 +207,7 @@ async fn cancel_queued_job_never_runs() {
     job.cancel.cancel();
     // The engine path does not exist, so any attempt to start it would fail the job instead of removing it.
     let missing = Arc::new(Engine::new(f._dir.path().join("no-such-engine")));
-    spawn_workers(1, f.state.store.clone(), missing);
+    spawn_workers(1, f.state.store.clone(), missing, f.state.stats.clone());
     for _ in 0..200 {
         if f.state.store.get(&job.id).is_none() {
             break;

@@ -84,6 +84,7 @@ pub fn test_state(
     data_dir: &Path,
     clock: std::sync::Arc<revit_downgrade_server::clock::ManualClock>,
 ) -> revit_downgrade_server::AppState {
+    use revit_downgrade_server::clock::Clock;
     use revit_downgrade_server::{AppState, config::Config, engine::Engine, jobs::JobStore};
     use std::sync::Arc;
     let engine = stub_path();
@@ -99,6 +100,10 @@ pub fn test_state(
             pairs.push((from, to));
         }
     }
+    let stats = Arc::new(revit_downgrade_server::stats::Stats::open(
+        data_dir.join("stats"),
+        clock.now(),
+    ));
     AppState {
         store: Arc::new(JobStore::new(data_dir.to_path_buf(), clock.clone())),
         engine: Arc::new(Engine::new(engine)),
@@ -108,6 +113,7 @@ pub fn test_state(
         reports: Arc::new(revit_downgrade_server::reports::Reports::new(
             data_dir.join("reports"),
         )),
+        stats,
         engine_version: Arc::new("engine-stub 0.1.0".to_string()),
     }
 }

@@ -17,6 +17,10 @@ This repository is public so you can check for yourself what happens to your fil
 - No tracking cookies and no advertising. Page views are counted with Cloudflare Web Analytics, which uses no cookies
   and does not follow you across sites.
 - File names are never written to the server logs.
+- The server keeps public usage totals, shown on the home page: conversions that finished, conversions that failed,
+  failed files sent for review, and the number of different visitors who converted a file. A visitor is recognised by a
+  one-way, keyed hash of their network address (IPv6 grouped by /64), so that number is approximate. The address itself,
+  file names and file contents are never stored for this. The totals are also served at `/api/stats`.
 
 How long files stay on the server:
 
@@ -52,6 +56,19 @@ REVIT_DOWNGRADE_ENGINE=target/debug/engine-stub REVIT_DOWNGRADE_WEB_DIR=web/dist
 ```
 
 Then open http://127.0.0.1:8080. With Docker: `docker compose -f deploy/docker-compose.yml up -d --build`.
+
+### Usage statistics
+
+The totals live in `<data>/stats/` (`REVIT_DOWNGRADE_DATA`, `/data` in Docker): `stats.json` holds the counts and `key`
+the secret for the visitor hash. Keep this directory on a persistent volume and back the two files up together. Restarts
+and the cleanup of jobs and reports never touch it.
+
+If `stats.json` or `key` cannot be read or is not valid, the server logs an error, keeps converting files and answers
+`/api/stats` with 503 (`stats_unavailable`); the home page then hides the totals. Nothing is counted until it is fixed.
+Fix or delete the file, then restart the server:
+
+- deleting `stats.json` starts the counts again from zero;
+- deleting `key` makes a new one, so visitors counted before may be counted again.
 
 ## Contact
 

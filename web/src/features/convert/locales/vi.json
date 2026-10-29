@@ -3,6 +3,15 @@
     "title": "Hạ phiên bản file Revit",
     "lead": "Mở model mới bằng Revit cũ. Miễn phí. File tự xoá sau 1 giờ.",
     "versions": "Revit 2027 · 2026 · 2025 · 2024 → xuống tới Revit 2023",
+    "stats": {
+      "label": "Số liệu sử dụng",
+      "people": "người đã dùng",
+      "succeeded": "file hạ thành công",
+      "failed": "file bị lỗi",
+      "contributed": "file lỗi được gửi để sửa",
+      "since": "Đếm từ {date}",
+      "help": "Hạ phiên bản file Revit rất khó và cần nhiều dữ liệu thật để làm đúng. Mỗi file lỗi bạn gửi giúp chúng tôi sửa lỗi và cải thiện công cụ liên tục."
+    },
     "pageTitle": "Hạ phiên bản file Revit online (2027 → 2023), miễn phí {'|'} Revit Downgrade",
     "description": "Hạ phiên bản file Revit miễn phí: chuyển file Revit 2027, 2026, 2025, 2024 (.rvt, .rfa, .rte, .rft) về bản cũ hơn, xuống tới Revit 2023. Không cần cài đặt. File tự xoá sau 1 giờ.",
     "pairPage": {

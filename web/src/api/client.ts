@@ -8,6 +8,7 @@ import type {
   JobState,
   JobStatus,
   ServerInfo,
+  UsageStats,
   YearPair,
 } from './types';
 
@@ -177,6 +178,33 @@ export async function deleteJob(id: string): Promise<void> {
 export async function sendReport(id: string): Promise<string> {
   const wire = await requestJson<{ report_code: string }>('POST', jobPath(id, '/report'), { consent: true });
   return wire.report_code;
+}
+
+const STATS_COUNTS = ['people', 'succeeded', 'failed', 'contributed'] as const;
+
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+/** The public usage totals, or `null` when they cannot be had for any reason. Never rejects. */
+export async function getStats(): Promise<UsageStats | null> {
+  try {
+    const wire = await requestJson<Record<string, unknown> | null>('GET', '/api/stats');
+    if (typeof wire !== 'object' || wire === null) {
+      return null;
+    }
+    const { since } = wire;
+    if (typeof since !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(since)) {
+      return null;
+    }
+    const [people, succeeded, failed, contributed] = STATS_COUNTS.map((key) => wire[key]);
+    if (!isCount(people) || !isCount(succeeded) || !isCount(failed) || !isCount(contributed)) {
+      return null;
+    }
+    return { since, people, succeeded, failed, contributed };
+  } catch {
+    return null;
+  }
 }
 
 /** The tus upload of a job (the server creates it together with the job). */

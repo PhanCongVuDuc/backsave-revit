@@ -14,7 +14,7 @@ test('upload_resumes_after_network_drop', async ({ page }) => {
   });
 
   await page.goto('/');
-  await page.getByLabel('Revit file').setInputFiles(revitFile('model_2026.rvt', 2026));
+  await page.getByLabel('Revit file', { exact: true }).setInputFiles(revitFile('model_2026.rvt', 2026));
   await page.getByRole('button', { name: 'Downgrade' }).click();
 
   await expect(page.getByRole('link', { name: /^Download model_2026_R2025\.rvt/ })).toBeVisible();
@@ -24,7 +24,7 @@ test('upload_resumes_after_network_drop', async ({ page }) => {
 
 test('reopen_tab_shows_result', async ({ page, context }) => {
   await page.goto('/');
-  await page.getByLabel('Revit file').setInputFiles(revitFile('model_2026.rvt', 2026));
+  await page.getByLabel('Revit file', { exact: true }).setInputFiles(revitFile('model_2026.rvt', 2026));
   await page.getByRole('button', { name: 'Downgrade' }).click();
   await expect(page.getByRole('link', { name: /^Download model_2026_R2025\.rvt/ })).toBeVisible();
   const address = page.url();
@@ -52,7 +52,7 @@ test('reload_mid_upload_then_continue', async ({ page }) => {
 
   const path = revitFile('model_2026.rvt', 2026);
   await page.goto('/');
-  await page.getByLabel('Revit file').setInputFiles(path);
+  await page.getByLabel('Revit file', { exact: true }).setInputFiles(path);
   await page.getByRole('button', { name: 'Downgrade' }).click();
   await expect.poll(() => attempts).toBeGreaterThan(0);
   await expect(page).toHaveURL(/\/job\/[0-9a-f]{32}$/);
@@ -64,7 +64,7 @@ test('reload_mid_upload_then_continue', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Add a Revit file' })).toBeVisible();
   await expect(page.getByText(/did not finish/)).toBeHidden();
 
-  await page.getByLabel('Revit file').setInputFiles(path);
+  await page.getByLabel('Revit file', { exact: true }).setInputFiles(path);
   // Nothing is sent until the user asks to continue.
   await expect(page.getByText('Continuing your earlier upload')).toBeVisible();
   await page.getByRole('button', { name: 'Continue upload' }).click();
@@ -90,7 +90,7 @@ test('second_tab_does_not_touch_first_tab_upload', async ({ page, context }) => 
 
   const path = revitFile('model_2026.rvt', 2026);
   await page.goto('/');
-  await page.getByLabel('Revit file').setInputFiles(path);
+  await page.getByLabel('Revit file', { exact: true }).setInputFiles(path);
   await page.getByRole('button', { name: 'Downgrade' }).click();
   await expect.poll(() => patchSeen).toBe(true);
 
@@ -101,7 +101,7 @@ test('second_tab_does_not_touch_first_tab_upload', async ({ page, context }) => 
   await expect(second.getByText(/did not finish|another tab/)).toBeHidden();
 
   // Choosing the same file in tab B neither takes over nor deletes tab A's job.
-  await second.getByLabel('Revit file').setInputFiles(path);
+  await second.getByLabel('Revit file', { exact: true }).setInputFiles(path);
   await expect(second.getByRole('alert')).toHaveText('This file is being uploaded in another tab.');
 
   releaseUpload();

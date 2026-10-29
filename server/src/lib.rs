@@ -6,6 +6,7 @@ pub mod engine;
 pub mod jobs;
 pub mod model;
 pub mod reports;
+pub mod stats;
 pub mod upload;
 pub mod worker;
 
@@ -26,6 +27,7 @@ pub struct AppState {
     pub pairs: Arc<Vec<(u16, u16)>>,
     pub clock: Arc<dyn clock::Clock>,
     pub reports: Arc<reports::Reports>,
+    pub stats: Arc<stats::Stats>,
     /// First line of the engine's `--version`, read once at startup.
     pub engine_version: Arc<String>,
 }

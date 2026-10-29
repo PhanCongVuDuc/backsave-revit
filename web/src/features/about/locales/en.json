@@ -42,6 +42,10 @@
       "title": "Cookies and tracking",
       "body": "Revit Downgrade sets no tracking cookies and has no advertising. Page views are counted with Cloudflare Web Analytics, which uses no cookies and does not follow you across sites. Your browser keeps your language choice and a list of your unfinished uploads (file name, size and date with the conversion ID), only so that choosing the same file again can continue its upload. The list is cleared when an upload finishes and after 6 hours."
     },
+    "stats": {
+      "title": "Usage statistics",
+      "body": "The server keeps running totals: conversions that finished, conversions that failed, failed files sent for review, and the number of different visitors who converted a file. A visitor is recognised by a one-way, keyed hash of their network address (IPv6 addresses are grouped by /64 network), so the count is approximate: people who share a network count once, and a person who changes network may count twice. The address itself, file names and file contents are never stored for this. The totals are shown publicly on the home page."
+    },
     "logs": {
       "title": "Server logs",
       "body": "Server logs never contain file names or file content."

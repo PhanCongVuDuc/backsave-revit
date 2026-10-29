@@ -98,3 +98,43 @@ pub fn spawn_cleanup(
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::clock::ManualClock;
+    use crate::stats::{Outcome, Stats};
+
+    #[test]
+    fn startup_and_sweeps_leave_statistics_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        let now = DateTime::from_timestamp(1_800_000_000, 0).unwrap();
+        let stats = Stats::open(data.join("stats"), now);
+        stats.record_outcome(Outcome::Succeeded, "203.0.113.7".parse().unwrap());
+        stats.record_contribution();
+        let stats_file = data.join("stats").join("stats.json");
+        let key_file = data.join("stats").join("key");
+        let (before_stats, before_key) = (
+            std::fs::read(&stats_file).unwrap(),
+            std::fs::read(&key_file).unwrap(),
+        );
+
+        // A report over the size cap, so `Reports::enforce` has something to remove.
+        let report = data.join("reports").join("R-OLD");
+        std::fs::create_dir_all(&report).unwrap();
+        std::fs::write(report.join("input.rvt"), vec![0u8; 64]).unwrap();
+        let reports = Reports::with_limits(data.join("reports"), 1, chrono::Duration::days(30));
+
+        wipe_jobs_dir(data).unwrap();
+        let store = JobStore::new(data.to_path_buf(), Arc::new(ManualClock::new(now)));
+        let later = now + chrono::Duration::days(60);
+        sweep(&store, &reports, now);
+        sweep(&store, &reports, later);
+        wipe_jobs_dir(data).unwrap();
+
+        assert!(!report.exists());
+        assert_eq!(std::fs::read(&stats_file).unwrap(), before_stats);
+        assert_eq!(std::fs::read(&key_file).unwrap(), before_key);
+    }
+}

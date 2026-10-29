@@ -49,6 +49,9 @@ watchEffect(() => {
     <h2>{{ t('about.cookies.title') }}</h2>
     <p>{{ t('about.cookies.body') }}</p>
 
+    <h2>{{ t('about.stats.title') }}</h2>
+    <p>{{ t('about.stats.body') }}</p>
+
     <h2>{{ t('about.logs.title') }}</h2>
     <p>{{ t('about.logs.body') }}</p>
 

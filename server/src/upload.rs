@@ -311,6 +311,10 @@ mod tests {
             pairs: Arc::new(vec![(2026, 2024)]),
             clock,
             reports: Arc::new(crate::reports::Reports::new(dir.path().join("reports"))),
+            stats: Arc::new(crate::stats::Stats::open(
+                dir.path().join("stats"),
+                chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap(),
+            )),
             engine_version: Arc::new("x".to_string()),
         };
         let req = NewJob {

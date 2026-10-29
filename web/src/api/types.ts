@@ -12,6 +12,16 @@ export interface ServerInfo {
   version: string;
 }
 
+/** Public usage totals since `since`. */
+export interface UsageStats {
+  /** The UTC day counting started, YYYY-MM-DD. */
+  since: string;
+  people: number;
+  succeeded: number;
+  failed: number;
+  contributed: number;
+}
+
 export interface CreateJobRequest {
   name: string;
   size: number;
