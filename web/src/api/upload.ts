@@ -3,7 +3,9 @@ import { DetailedError, Upload } from 'tus-js-client';
 import { ApiError, apiErrorFrom } from './client';
 import type { UploadOptions } from './types';
 
-export const UPLOAD_CHUNK_SIZE = 50 * 1024 * 1024;
+// Small requests: behind a tunnel or proxy a large request body slows down and is cut once the server has not answered
+// within about 100 s (Cloudflare 524), so a 50 MiB chunk could never finish. 4 MiB requests finish in seconds.
+export const UPLOAD_CHUNK_SIZE = 4 * 1024 * 1024;
 export const UPLOAD_RETRY_DELAYS = [0, 1000, 3000, 5000, 10_000];
 
 function uploadErrorOf(error: Error): ApiError {

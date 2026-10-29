@@ -292,7 +292,7 @@ describe('uploadFile', () => {
     expect(upload.start).toHaveBeenCalledOnce();
     expect(upload.options).toMatchObject({
       uploadUrl: '/api/uploads/x',
-      chunkSize: 50 * 1024 * 1024,
+      chunkSize: 4 * 1024 * 1024,
       retryDelays: [0, 1000, 3000, 5000, 10000],
       removeFingerprintOnSuccess: true,
     });
