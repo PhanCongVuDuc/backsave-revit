@@ -1,9 +1,11 @@
-//! JSON API under `/api`: server info, usage statistics, job creation, status, downloads and
-//! deletion.
+//! JSON API under `/api`: server info, usage statistics, job creation, status, downloads,
+//! deletion and reports.
 
 use crate::AppState;
 use crate::config::IpCidr;
-use crate::jobs::{CancelOutcome, Job, JobId, NewJob, ReportClaim};
+use crate::jobs::{
+    CancelOutcome, Job, JobId, NewJob, OUTPUT_TTL_S, OpenReportStart, ReportClaim, ReportKind,
+};
 use crate::model::{ApiError, DroppedElement, ErrorKind, FileKind, JobState, estimate};
 use axum::Json;
 use axum::Router;
@@ -20,6 +22,7 @@ use std::net::{IpAddr, SocketAddr};
 use tokio_util::io::ReaderStream;
 
 const MAX_NAME_CHARS: usize = 255;
+const MAX_NOTE_CHARS: usize = 500;
 const NO_STORE: &str = "no-store";
 /// The public totals may be up to a minute old in browsers and proxies.
 const STATS_CACHE: &str = "public, max-age=60";
@@ -33,6 +36,11 @@ pub fn routes() -> Router<AppState> {
         .route("/api/jobs/{id}/file", get(download_file))
         .route("/api/jobs/{id}/dropped", get(dropped))
         .route("/api/jobs/{id}/report", post(report_job))
+        .route("/api/jobs/{id}/open-report", post(open_report_start))
+        .route(
+            "/api/jobs/{id}/open-report/finish",
+            post(open_report_finish),
+        )
         .route("/api", any(api_not_found))
         .route("/api/{*rest}", any(api_not_found))
 }
@@ -77,7 +85,7 @@ pub fn client_ip(
 async fn info(State(s): State<AppState>) -> Json<serde_json::Value> {
     Json(json!({
         "max_bytes": s.config.max_bytes,
-        "output_ttl_s": 3600,
+        "output_ttl_s": OUTPUT_TTL_S,
         "pairs": &*s.pairs,
         "version": env!("CARGO_PKG_VERSION"),
     }))
@@ -374,32 +382,22 @@ async fn report_job(
     let consent =
         matches!(&body, Ok(Json(v)) if v.get("consent") == Some(&serde_json::Value::Bool(true)));
     if !consent {
-        return Err(ApiError::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "consent_required",
-            "Sending a report needs your consent.",
-        ));
+        return Err(consent_required());
     }
     let id: JobId = raw.parse().map_err(|_| not_found())?;
     // The claim is atomic: of two concurrent requests only one proceeds.
-    let job = match s.store.claim_report(&id) {
+    let job = match s.store.claim_report(&id, ReportKind::Failed) {
         ReportClaim::Claimed(job) => *job,
         ReportClaim::NotFound => return Err(not_found()),
         ReportClaim::Expired => return Err(expired()),
-        ReportClaim::NotFailed => {
+        ReportClaim::NotFailed | ReportClaim::NotDone => {
             return Err(ApiError::new(
                 StatusCode::CONFLICT,
                 "not_failed",
                 "Only a failed conversion can be reported.",
             ));
         }
-        ReportClaim::AlreadyReported => {
-            return Err(ApiError::new(
-                StatusCode::CONFLICT,
-                "already_reported",
-                "This conversion was already reported.",
-            ));
-        }
+        ReportClaim::AlreadyReported => return Err(already_reported()),
     };
     let input = s.store.input_path(&job);
     let log = s.store.log_path(&job);
@@ -438,6 +436,234 @@ async fn report_job(
         tracing::warn!("report written for a job that no longer exists");
     }
     Ok((StatusCode::CREATED, Json(json!({ "report_code": code }))).into_response())
+}
+
+fn consent_required() -> ApiError {
+    ApiError::new(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "consent_required",
+        "Sending a report needs your consent.",
+    )
+}
+
+fn already_reported() -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        "already_reported",
+        "This conversion was already reported.",
+    )
+}
+
+/// Adds `Cache-Control: no-store`.
+fn no_store(result: Result<Response, ApiError>) -> Response {
+    let mut resp = result.unwrap_or_else(IntoResponse::into_response);
+    resp.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static(NO_STORE));
+    resp
+}
+
+#[derive(Deserialize)]
+struct OpenReportRequest {
+    size: u64,
+    note: Option<String>,
+}
+
+/// Opens the upload of the original for a "does not open" report on a done job, or resumes it.
+async fn open_report_start(
+    State(s): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(raw): Path<String>,
+    body: Result<Json<serde_json::Value>, JsonRejection>,
+) -> Response {
+    no_store(start_open_report(&s, peer, &headers, &raw, body))
+}
+
+fn start_open_report(
+    s: &AppState,
+    peer: SocketAddr,
+    headers: &HeaderMap,
+    raw: &str,
+    body: Result<Json<serde_json::Value>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Ok(Json(value)) = body else {
+        return Err(consent_required());
+    };
+    if value.get("consent") != Some(&serde_json::Value::Bool(true)) {
+        return Err(consent_required());
+    }
+    let req: OpenReportRequest = serde_json::from_value(value).map_err(|_| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "The request body is not valid.",
+        )
+    })?;
+    let note = req
+        .note
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_string);
+    if note
+        .as_ref()
+        .is_some_and(|n| n.chars().count() > MAX_NOTE_CHARS)
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "note_too_long",
+            "The note must be 500 characters or fewer.",
+        ));
+    }
+    let id: JobId = raw.parse().map_err(|_| not_found())?;
+    let ip = client_ip(
+        s.config.trust_proxy,
+        &s.config.trusted_proxies,
+        headers,
+        peer,
+    );
+    let status = match s.store.open_report_start(&id, req.size, note, ip)? {
+        OpenReportStart::Opened => StatusCode::CREATED,
+        OpenReportStart::Resumed => StatusCode::OK,
+    };
+    let body = json!({ "upload_url": format!("/api/jobs/{id}/open-report/upload") });
+    Ok((status, Json(body)).into_response())
+}
+
+/// Makes the "does not open" report once the original has fully arrived: moves it, copies the
+/// converted file and the log into a new report, and moves one success to the failures in the
+/// usage statistics.
+async fn open_report_finish(State(s): State<AppState>, Path(raw): Path<String>) -> Response {
+    no_store(finish_open_report(&s, &raw).await)
+}
+
+async fn finish_open_report(s: &AppState, raw: &str) -> Result<Response, ApiError> {
+    let job = load_job(s, raw)?;
+    if job.state == JobState::Expired {
+        return Err(expired());
+    }
+    if job.report_code.is_some() || job.reporting {
+        return Err(already_reported());
+    }
+    let Some(open) = &job.open_report else {
+        return Err(not_found());
+    };
+    if open.received != job.size {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "upload_incomplete",
+            "The file has not fully arrived yet.",
+        ));
+    }
+    // The claim is atomic: of two concurrent requests only one proceeds.
+    let job = match s.store.claim_report(&job.id, ReportKind::DoesNotOpen) {
+        ReportClaim::Claimed(job) => *job,
+        ReportClaim::NotFound => return Err(not_found()),
+        ReportClaim::Expired => return Err(expired()),
+        ReportClaim::AlreadyReported => return Err(already_reported()),
+        ReportClaim::NotFailed | ReportClaim::NotDone => {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "not_done",
+                "Only a finished conversion can be reported as not opening.",
+            ));
+        }
+    };
+    let Some(open) = job.open_report.clone() else {
+        s.store.release_report(&job.id);
+        return Err(not_found());
+    };
+    let report_input = s.store.report_input_path(&job);
+    match tokio::fs::metadata(&report_input).await {
+        Ok(m) if m.len() == job.size => {}
+        Ok(_) => {
+            let mismatch = ApiError::new(
+                StatusCode::CONFLICT,
+                "size_mismatch",
+                "This is not the original file of this conversion.",
+            );
+            return Err(abandon_open_report(s, &job, mismatch).await);
+        }
+        Err(e) => {
+            tracing::warn!(job_id = %job.id, error = ?e.kind(), "report upload could not be read");
+            return Err(abandon_open_report(s, &job, storage_error()).await);
+        }
+    }
+    let (output, log) = (s.store.output_path(&job), s.store.log_path(&job));
+    let (reports, stats, version, now) = (
+        s.reports.clone(),
+        s.stats.clone(),
+        s.engine_version.clone(),
+        s.clock.now(),
+    );
+    let made = {
+        let job = job.clone();
+        tokio::task::spawn_blocking(move || {
+            let done_at = job.finished_at.unwrap_or(now);
+            let made = reports.create_unopenable(
+                &job,
+                &report_input,
+                &output,
+                &log,
+                open.note.as_deref(),
+                &version,
+                done_at,
+                now,
+            );
+            if made.is_ok() {
+                stats.record_unopenable();
+                reports.enforce(now);
+            }
+            made
+        })
+        .await
+        .unwrap_or_else(|_| Err(std::io::Error::other("report task panicked")))
+    };
+    let code = match made {
+        Ok(code) => code,
+        Err(e) => {
+            tracing::warn!(job_id = %job.id, error = ?e.kind(), "does-not-open report could not be saved");
+            return Err(abandon_open_report(s, &job, storage_error()).await);
+        }
+    };
+    tracing::info!(
+        job_id = %job.id,
+        size_mib = job.size.div_ceil(1 << 20),
+        "does-not-open report saved"
+    );
+    if !s.store.set_report_code(&job.id, code.clone()) {
+        // The job vanished while the report was being written; the report itself is kept.
+        tracing::warn!("report written for a job that no longer exists");
+    }
+    Ok((StatusCode::CREATED, Json(json!({ "report_code": code }))).into_response())
+}
+
+/// Gives the report claim back after a failed finish and picks the answer. When the original is
+/// no longer complete on disk (wrong size, lost, or removed with a failed report), the open report
+/// is closed too, so that the next attempt uploads it again from the start instead of resuming at
+/// a full offset. A job that expired or vanished meanwhile is answered as such; otherwise
+/// `alive_error`.
+async fn abandon_open_report(s: &AppState, job: &Job, alive_error: ApiError) -> ApiError {
+    let intact = tokio::fs::metadata(s.store.report_input_path(job))
+        .await
+        .is_ok_and(|m| m.len() == job.size);
+    if !intact {
+        s.store.open_report_close(&job.id);
+    }
+    s.store.release_report(&job.id);
+    match s.store.get(&job.id) {
+        None => not_found(),
+        Some(j) if j.state == JobState::Expired => expired(),
+        Some(_) => alive_error,
+    }
+}
+
+fn storage_error() -> ApiError {
+    ApiError::new(
+        StatusCode::INSUFFICIENT_STORAGE,
+        "storage_error",
+        "Could not save the report. Try again.",
+    )
 }
 
 fn internal() -> ApiError {

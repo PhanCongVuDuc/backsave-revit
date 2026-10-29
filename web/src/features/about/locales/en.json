@@ -26,10 +26,10 @@
         },
         "output": {
           "what": "The converted file and the list of removed elements",
-          "when": "1 hour after they are ready, or when you press Delete now"
+          "when": "2 hours after they are ready, or when you press Delete now"
         },
         "report": {
-          "what": "A file you chose to send for review",
+          "what": "Files you chose to send for review (a failed conversion, or one that does not open in Revit)",
           "when": "After 30 days or when you ask, whichever comes first. At most 20 GB are kept; the oldest go first."
         },
         "cancelled": {
@@ -38,13 +38,17 @@
         }
       }
     },
+    "unopenable": {
+      "title": "When a converted file doesn't open in Revit",
+      "body": "If Revit refuses a converted file, you can press \"File doesn't open in Revit?\" on the result. Nothing is sent unless you tick the consent box and press Send. Then the server keeps your original file (chosen again if the page no longer holds it), a copy of the converted file, the conversion log and your note, if you wrote one, as a report for up to 30 days, only to find and fix the problem. The report holds no file name and no network address; you get a report code to quote. A conversion reported this way counts as failed in the usage statistics."
+    },
     "cookies": {
       "title": "Cookies and tracking",
       "body": "Revit Downgrade sets no tracking cookies and has no advertising. Page views are counted with Cloudflare Web Analytics, which uses no cookies and does not follow you across sites. Your browser keeps your language choice and a list of your unfinished uploads (file name, size and date with the conversion ID), only so that choosing the same file again can continue its upload. The list is cleared when an upload finishes and after 6 hours."
     },
     "stats": {
       "title": "Usage statistics",
-      "body": "The server keeps running totals: conversions that finished, conversions that failed, failed files sent for review, and the number of different visitors who converted a file. A visitor is recognised by a one-way, keyed hash of their network address (IPv6 addresses are grouped by /64 network), so the count is approximate: people who share a network count once, and a person who changes network may count twice. The address itself, file names and file contents are never stored for this. The totals are shown publicly on the home page."
+      "body": "The server keeps running totals: conversions that finished, conversions that failed, failed files sent for review, and the number of different visitors who converted a file. A visitor is recognised by a one-way, keyed hash of their network address (IPv6 addresses are grouped by /64 network), so the count is approximate: people who share a network count once, and a person who changes network may count twice. The address itself, file names and file contents are never stored for this. A converted file reported as not opening in Revit moves from finished to failed. The totals are shown publicly on the home page."
     },
     "logs": {
       "title": "Server logs",

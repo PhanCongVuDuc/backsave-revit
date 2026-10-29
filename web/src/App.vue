@@ -85,7 +85,7 @@ const { t, locale } = useI18n();
 
 .wordmark {
   color: var(--color-text);
-  font-size: 1.0625rem;
+  font-size: 1.375rem;
   font-weight: 700;
   text-decoration: none;
 }

@@ -42,6 +42,8 @@ vi.mock('@/api', async (importOriginal) => {
     getDropped: vi.fn(),
     deleteJob: vi.fn(),
     sendReport: vi.fn(),
+    startOpenReport: vi.fn(),
+    finishOpenReport: vi.fn(),
     uploadFile: vi.fn(),
   };
 });
@@ -789,5 +791,145 @@ describe('resume, cancel and delete', () => {
     expect(store.file).toBeNull();
     expect(store.info).toBeNull();
     expect(store.targets).toEqual([]);
+  });
+});
+
+describe('reporting a file that does not open in Revit', () => {
+  const UPLOAD_URL = `/api/jobs/${JOB}/open-report/upload`;
+  const DONE = { state: 'done', result: { fileName: 'tower_R2025.rvt', size: 10, droppedCount: 0 } } as const;
+
+  /** A job this tab uploaded and that is done; the tab still holds its file. */
+  async function doneStore() {
+    const store = await readyStore();
+    mocked.getJob.mockResolvedValue(status({ ...DONE, size: store.file?.size ?? 0 }));
+    await store.submit();
+    await settle();
+    return store;
+  }
+
+  beforeEach(() => {
+    mocked.startOpenReport.mockResolvedValue(UPLOAD_URL);
+    mocked.finishOpenReport.mockResolvedValue('R-7K2M9Q');
+  });
+
+  it('sends the file this tab still holds and keeps the report code', async () => {
+    const store = await doneStore();
+    expect(store.phase).toBe('done');
+    expect(store.canReuseFile).toBe(true);
+    mocked.uploadFile.mockImplementationOnce((_file, _url, options) => {
+      options?.onProgress?.(5, 10);
+      return Promise.resolve();
+    });
+    await expect(store.reportUnopenable('  Revit says the file is corrupt  ')).resolves.toBe(true);
+    expect(mocked.startOpenReport).toHaveBeenCalledExactlyOnceWith(
+      JOB,
+      store.file?.size,
+      'Revit says the file is corrupt',
+    );
+    expect(mocked.uploadFile).toHaveBeenLastCalledWith(store.file, UPLOAD_URL, expect.anything());
+    expect(mocked.finishOpenReport).toHaveBeenCalledExactlyOnceWith(JOB);
+    expect(store.reportCode).toBe('R-7K2M9Q');
+    expect(store.unopenableProgress).toBe(0.5);
+    expect(store.unopenableSending).toBe(false);
+    expect(store.unopenableError).toBeNull();
+    expect(store.phase).toBe('done');
+    // Once reported, never again.
+    await expect(store.reportUnopenable('')).resolves.toBe(false);
+    expect(mocked.startOpenReport).toHaveBeenCalledOnce();
+  });
+
+  it('sends no note when the note is blank', async () => {
+    const store = await doneStore();
+    await store.reportUnopenable('   ');
+    expect(mocked.startOpenReport).toHaveBeenCalledExactlyOnceWith(JOB, store.file?.size, undefined);
+  });
+
+  it('needs the file again after a reload, then sends the one picked', async () => {
+    mocked.getJob.mockResolvedValue(status({ ...DONE, size: 4 }));
+    const store = useConvertStore();
+    await store.resume(JOB);
+    expect(store.phase).toBe('done');
+    expect(store.canReuseFile).toBe(false);
+    await expect(store.reportUnopenable('')).resolves.toBe(false);
+    expect(store.unopenableError).toBe('needs_file');
+    expect(mocked.startOpenReport).not.toHaveBeenCalled();
+
+    const picked = new File(['abcd'], 'tower.rvt');
+    await expect(store.reportUnopenable('', picked)).resolves.toBe(true);
+    expect(mocked.startOpenReport).toHaveBeenCalledExactlyOnceWith(JOB, 4, undefined);
+    expect(mocked.uploadFile).toHaveBeenLastCalledWith(picked, UPLOAD_URL, expect.anything());
+    expect(store.reportCode).toBe('R-7K2M9Q');
+    expect(store.unopenableError).toBeNull();
+  });
+
+  it('does not reuse a file of another size than the job', async () => {
+    const store = await readyStore();
+    mocked.getJob.mockResolvedValue(status({ ...DONE, size: (store.file?.size ?? 0) + 1 }));
+    await store.submit();
+    await settle();
+    expect(store.canReuseFile).toBe(false);
+  });
+
+  it('exposes the refusal code and lets the user try again', async () => {
+    const store = await doneStore();
+    mocked.startOpenReport.mockRejectedValueOnce(new ApiError(409, 'size_mismatch', 'Not the original.'));
+    await expect(store.reportUnopenable('')).resolves.toBe(false);
+    expect(store.unopenableError).toBe('size_mismatch');
+    expect(store.unopenableSending).toBe(false);
+    expect(store.reportCode).toBeNull();
+
+    mocked.finishOpenReport.mockRejectedValueOnce(new ApiError(409, 'already_reported', 'Sent.'));
+    await store.reportUnopenable('');
+    expect(store.unopenableError).toBe('already_reported');
+
+    mocked.finishOpenReport.mockRejectedValueOnce(new ApiError(507, 'storage_error', 'Try again.'));
+    await store.reportUnopenable('');
+    expect(store.unopenableError).toBe('storage_error');
+
+    await expect(store.reportUnopenable('')).resolves.toBe(true);
+    expect(store.unopenableError).toBeNull();
+    expect(store.reportCode).toBe('R-7K2M9Q');
+  });
+
+  it('says expired when the upload finds the job gone', async () => {
+    const store = await doneStore();
+    mocked.uploadFile.mockRejectedValueOnce(new ApiError(410, 'job_gone', 'gone'));
+    mocked.getJob.mockRejectedValueOnce(new ApiError(410, 'expired', 'gone'));
+    await expect(store.reportUnopenable('')).resolves.toBe(false);
+    expect(store.unopenableError).toBe('expired');
+
+    mocked.uploadFile.mockRejectedValueOnce(new ApiError(404, 'job_gone', 'gone'));
+    mocked.getJob.mockRejectedValueOnce(new ApiError(404, 'not_found', 'gone'));
+    await store.reportUnopenable('');
+    expect(store.unopenableError).toBe('not_found');
+  });
+
+  it('shows the report code the server already has after a reload', async () => {
+    mocked.getJob.mockResolvedValue(status({ ...DONE, reportCode: 'R-AAAAAA' }));
+    const store = useConvertStore();
+    await store.resume(JOB);
+    expect(store.reportCode).toBe('R-AAAAAA');
+    await expect(store.reportUnopenable('', new File(['x'], 'a.rvt'))).resolves.toBe(false);
+    expect(mocked.startOpenReport).not.toHaveBeenCalled();
+  });
+
+  it.each(['upload_closed', 'already_reported'])(
+    'shows the code of a report another tab sent first (%s)',
+    async (refusal) => {
+      const store = await doneStore();
+      mocked.uploadFile.mockRejectedValueOnce(new ApiError(409, refusal, 'closed'));
+      mocked.getJob.mockResolvedValueOnce(status({ ...DONE, reportCode: 'R-OTHER1' }));
+      await expect(store.reportUnopenable('')).resolves.toBe(false);
+      expect(store.unopenableError).toBe('already_reported');
+      expect(store.reportCode).toBe('R-OTHER1');
+    },
+  );
+
+  it('refuses to report a failed job', async () => {
+    mocked.getJob.mockResolvedValue(status({ state: 'failed', error: { kind: 'corrupt', message: 'bad' } }));
+    const store = useConvertStore();
+    await store.resume(JOB);
+    await expect(store.reportUnopenable('', new File(['x'], 'a.rvt'))).resolves.toBe(false);
+    expect(mocked.startOpenReport).not.toHaveBeenCalled();
   });
 });

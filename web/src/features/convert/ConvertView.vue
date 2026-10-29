@@ -192,8 +192,14 @@ onMounted(() => {
         :dropped="store.dropped"
         :dropped-error="store.droppedError"
         :expires-at="store.expiresAt"
+        :report-code="store.reportCode"
+        :can-reuse-file="store.canReuseFile"
+        :report-sending="store.unopenableSending"
+        :report-progress="store.unopenableProgress"
+        :report-error="store.unopenableError"
         @delete-now="store.deleteNow"
         @convert-another="store.cancel"
+        @report-unopenable="store.reportUnopenable"
       />
       <FailurePanel
         v-else-if="store.phase === 'failed' && store.error"

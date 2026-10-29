@@ -1,3 +1,6 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { type Page } from '@playwright/test';
 
 import { expect, revitFile, test } from './fixtures';
@@ -136,4 +139,76 @@ test('usage_stats_hidden_when_unavailable', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Add a Revit file' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Usage so far' })).toHaveCount(0);
   await expect(page.getByText(/statistics/i)).toHaveCount(0);
+});
+
+const OPEN_REPORT = "File doesn't open in Revit?";
+const REPORT_CONSENT = /^Send the original file, the converted file and the conversion log\./;
+const REPORT_CODE = /Your report code is R-[0-9A-Z]{6}\./;
+
+test('report_unopenable_with_the_file_this_tab_holds', async ({ page, browser, request, clientIp }) => {
+  const served = async () => (await (await request.get('/api/stats')).json()) as Totals;
+  const start = await served();
+  await choose(page, revitFile('model_2026.rvt', 2026));
+  await page.getByRole('button', { name: 'Downgrade' }).click();
+  const download = page.getByRole('link', { name: /^Download model_2026_R2025\.rvt/ });
+  await expect(download).toBeVisible();
+  await expect.poll(async () => (await served()).succeeded).toBe(start.succeeded + 1);
+  const before = await served();
+
+  // Three actions: open, consent, send. The file is not chosen again.
+  await page.getByRole('button', { name: OPEN_REPORT }).click();
+  await page.getByRole('checkbox', { name: REPORT_CONSENT }).check();
+  await expect(page.getByText('This page no longer holds your original file.', { exact: false })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByText(REPORT_CODE)).toBeVisible();
+  await expect(download).toBeVisible();
+
+  const after = await served();
+  expect(after).toEqual({
+    ...before,
+    succeeded: before.succeeded - 1,
+    failed: before.failed + 1,
+    contributed: before.contributed + 1,
+  });
+
+  // A reloaded tab shows the code and offers no second report.
+  await page.reload();
+  await expect(page.getByText(REPORT_CODE)).toBeVisible();
+  await expect(page.getByRole('button', { name: OPEN_REPORT })).toHaveCount(0);
+
+  // The home page of a fresh browser shows the server's totals.
+  const context = await browser.newContext({ extraHTTPHeaders: { 'X-Forwarded-For': clientIp } });
+  try {
+    const fresh = await context.newPage();
+    await fresh.goto(new URL('/', page.url()).href);
+    expect(await shownTotals(fresh)).toEqual(Object.fromEntries(COUNTS.map((key) => [key, after[key]])));
+  } finally {
+    await context.close();
+  }
+});
+
+test('report_unopenable_after_reload_asks_for_the_original', async ({ page, request, filesDir }) => {
+  const original = revitFile('model_2026.rvt', 2026);
+  const wrong = join(filesDir, 'other_size.rvt');
+  writeFileSync(wrong, Buffer.alloc(1234, 7));
+  await choose(page, original);
+  await page.getByRole('button', { name: 'Downgrade' }).click();
+  await expect(page.getByRole('link', { name: /^Download model_2026_R2025\.rvt/ })).toBeVisible();
+  const id = /\/job\/([0-9a-f]{32})$/.exec(page.url())?.[1] ?? '';
+
+  await page.reload();
+  await page.getByRole('button', { name: OPEN_REPORT }).click();
+  await page.getByRole('checkbox', { name: REPORT_CONSENT }).check();
+  const picker = page.getByLabel(/^This page no longer holds your original file\./);
+  await picker.setInputFiles(wrong);
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText(
+    'This is not the original file of this conversion. Choose the file you converted.',
+  );
+  const job = (await (await request.get(`/api/jobs/${id}`)).json()) as { report_code: string | null };
+  expect(job.report_code).toBeNull();
+
+  await picker.setInputFiles(original);
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByText(REPORT_CODE)).toBeVisible();
 });

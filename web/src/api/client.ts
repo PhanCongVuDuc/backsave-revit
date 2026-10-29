@@ -180,6 +180,22 @@ export async function sendReport(id: string): Promise<string> {
   return wire.report_code;
 }
 
+/**
+ * Opens (or resumes) the upload of the original for a "does not open in Revit" report on a done job, with the user's
+ * consent; resolves to the tus upload URL. `size` must be the size of the file the job was made from.
+ */
+export async function startOpenReport(id: string, size: number, note?: string): Promise<string> {
+  const body = note === undefined ? { consent: true, size } : { consent: true, size, note };
+  const wire = await requestJson<{ upload_url: string }>('POST', jobPath(id, '/open-report'), body);
+  return wire.upload_url;
+}
+
+/** Makes the "does not open in Revit" report once its upload is complete; resolves to the report code. */
+export async function finishOpenReport(id: string): Promise<string> {
+  const wire = await requestJson<{ report_code: string }>('POST', jobPath(id, '/open-report/finish'));
+  return wire.report_code;
+}
+
 const STATS_COUNTS = ['people', 'succeeded', 'failed', 'contributed'] as const;
 
 function isCount(value: unknown): value is number {

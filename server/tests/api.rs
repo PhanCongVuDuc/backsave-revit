@@ -160,7 +160,7 @@ async fn info_returns_pairs_from_engine() {
     assert_eq!(resp.status(), StatusCode::OK);
     let v = body_json(resp).await;
     assert_eq!(v["max_bytes"], 1_073_741_824u64);
-    assert_eq!(v["output_ttl_s"], 3600);
+    assert_eq!(v["output_ttl_s"], 7200);
     assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
     let got: Vec<(u16, u16)> = serde_json::from_value(v["pairs"].clone()).unwrap();
     assert_eq!(got, pairs);
@@ -807,4 +807,751 @@ async fn stats_survive_restarts() {
     assert_eq!(after["contributed"], before["contributed"]);
     assert_eq!(after["people"], before["people"]);
     assert_eq!(after["since"], before["since"]);
+}
+
+// "Does not open in Revit" reports.
+
+fn post_open_report(id: &str, body: &str) -> Request<Body> {
+    Request::builder()
+        .method(Method::POST)
+        .uri(format!("/api/jobs/{id}/open-report"))
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+fn open_body(size: usize, note: Option<&str>) -> String {
+    match note {
+        Some(n) => json!({ "consent": true, "size": size, "note": n }),
+        None => json!({ "consent": true, "size": size }),
+    }
+    .to_string()
+}
+
+fn patch_open_report(id: &str, offset: usize, bytes: &[u8]) -> Request<Body> {
+    Request::builder()
+        .method(Method::PATCH)
+        .uri(format!("/api/jobs/{id}/open-report/upload"))
+        .header("content-type", "application/offset+octet-stream")
+        .header("tus-resumable", "1.0.0")
+        .header("upload-offset", offset.to_string())
+        .body(Body::from(bytes.to_vec()))
+        .unwrap()
+}
+
+fn head_open_report(id: &str) -> Request<Body> {
+    Request::builder()
+        .method(Method::HEAD)
+        .uri(format!("/api/jobs/{id}/open-report/upload"))
+        .header("tus-resumable", "1.0.0")
+        .body(Body::empty())
+        .unwrap()
+}
+
+fn finish_open_report(id: &str) -> Request<Body> {
+    Request::builder()
+        .method(Method::POST)
+        .uri(format!("/api/jobs/{id}/open-report/finish"))
+        .body(Body::empty())
+        .unwrap()
+}
+
+/// A done job of `client` and the bytes of its original.
+async fn done_from(f: &Fixture, client: &str) -> (String, Vec<u8>) {
+    let id = run_from(f, client, "ok", "done").await;
+    (id, marker_bytes("ok", 2026))
+}
+
+/// Opens the report, sends the whole original and finishes; returns the report code.
+async fn report_unopenable(f: &Fixture, client: &str, id: &str, data: &[u8]) -> String {
+    let resp = send_from(
+        f,
+        client,
+        post_open_report(id, &open_body(data.len(), None)),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let resp = send_from(f, client, patch_open_report(id, 0, data)).await;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    let resp = send_from(f, client, finish_open_report(id)).await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    body_json(resp).await["report_code"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+fn job_of(f: &Fixture, id: &str) -> revit_downgrade_server::jobs::Job {
+    f.state.store.get(&id.parse().unwrap()).unwrap()
+}
+
+fn report_codes(f: &Fixture) -> Vec<String> {
+    match std::fs::read_dir(f.dir.path().join("reports")) {
+        Ok(entries) => entries
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+async fn error_code(resp: axum::response::Response) -> (StatusCode, Value) {
+    let status = resp.status();
+    (status, body_json(resp).await["error"]["code"].clone())
+}
+
+#[tokio::test]
+async fn open_report_full_flow_makes_a_report_and_moves_the_counts() {
+    let f = setup_with(|c| c.trust_proxy = true);
+    start_workers(&f);
+    let client = "203.0.113.10";
+    let (id, data) = done_from(&f, client).await;
+    let before = wait_for_stat(&f, "succeeded", 1).await;
+    assert_eq!(
+        (&before["failed"], &before["contributed"]),
+        (&json!(0), &json!(0))
+    );
+
+    let note = "Revit says the file is corrupt";
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&id, &open_body(data.len(), Some(note))),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    assert_eq!(resp.headers()["cache-control"], "no-store");
+    assert_eq!(
+        body_json(resp).await["upload_url"],
+        format!("/api/jobs/{id}/open-report/upload")
+    );
+
+    let half = data.len() / 2;
+    let resp = send_from(&f, client, patch_open_report(&id, 0, &data[..half])).await;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    assert_eq!(resp.headers()["upload-offset"], half.to_string().as_str());
+    let resp = send_from(&f, client, head_open_report(&id)).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.headers()["upload-offset"], half.to_string().as_str());
+    assert_eq!(
+        resp.headers()["upload-length"],
+        data.len().to_string().as_str()
+    );
+    assert_eq!(resp.headers()["tus-resumable"], "1.0.0");
+    let resp = send_from(&f, client, patch_open_report(&id, half, &data[half..])).await;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    let resp = send_from(&f, client, finish_open_report(&id)).await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    assert_eq!(resp.headers()["cache-control"], "no-store");
+    let code = body_json(resp).await["report_code"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(code.starts_with("R-") && code.len() == 8, "{code}");
+
+    let dir = f.dir.path().join("reports").join(&code);
+    assert_eq!(std::fs::read(dir.join("input.rvt")).unwrap(), data);
+    assert_eq!(std::fs::read(dir.join("output.rvt")).unwrap(), data);
+    let meta: Value =
+        serde_json::from_slice(&std::fs::read(dir.join("meta.json")).unwrap()).unwrap();
+    assert_eq!(meta["report_type"], "does_not_open");
+    assert_eq!(meta["kind"], "rvt");
+    assert_eq!(meta["size"], data.len());
+    assert_eq!(meta["year"], 2026);
+    assert_eq!(meta["target"], 2025);
+    assert_eq!(meta["note"], note);
+    assert!(meta["done_at"].is_string() && meta["reported_at"].is_string());
+    let text = std::fs::read_to_string(dir.join("meta.json")).unwrap();
+    assert!(!text.contains("House") && !text.contains(client));
+
+    let v = body_json(send(&f, get(&format!("/api/jobs/{id}"))).await).await;
+    assert_eq!(v["state"], "done");
+    assert_eq!(v["report_code"], code.as_str());
+    let resp = send(&f, get(&format!("/api/jobs/{id}/file"))).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(body_bytes(resp).await, data);
+    assert!(!f.state.store.report_input_path(&job_of(&f, &id)).exists());
+
+    let after = stats(&f).await;
+    assert_eq!(
+        (
+            &after["succeeded"],
+            &after["failed"],
+            &after["contributed"],
+            &after["people"]
+        ),
+        (&json!(0), &json!(1), &json!(1), &before["people"])
+    );
+}
+
+#[tokio::test]
+async fn open_report_start_refusals() {
+    let f = setup_with(|c| c.trust_proxy = true);
+    start_workers(&f);
+    let client = "203.0.113.11";
+    let (id, data) = done_from(&f, client).await;
+    let size = data.len();
+
+    for body in [
+        json!({ "size": size }).to_string(),
+        json!({ "consent": false, "size": size }).to_string(),
+        json!({ "consent": "true", "size": size }).to_string(),
+        "not json".to_string(),
+    ] {
+        let (status, code) =
+            error_code(send_from(&f, client, post_open_report(&id, &body)).await).await;
+        assert_eq!(
+            (status, code),
+            (StatusCode::UNPROCESSABLE_ENTITY, json!("consent_required")),
+            "{body}"
+        );
+    }
+    let long = "é".repeat(501);
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&id, &open_body(size, Some(&long))),
+    )
+    .await;
+    assert_eq!(
+        error_code(resp).await,
+        (StatusCode::UNPROCESSABLE_ENTITY, json!("note_too_long"))
+    );
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&id, &open_body(size + 1, None)),
+    )
+    .await;
+    assert_eq!(
+        error_code(resp).await,
+        (StatusCode::CONFLICT, json!("size_mismatch"))
+    );
+    assert!(
+        job_of(&f, &id).open_report.is_none(),
+        "nothing opened, no byte taken"
+    );
+
+    let failed = run_from(&f, client, "fail", "failed").await;
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&failed, &open_body(size, None)),
+    )
+    .await;
+    assert_eq!(
+        error_code(resp).await,
+        (StatusCode::CONFLICT, json!("not_done"))
+    );
+    for unknown in ["zz".to_string(), "0".repeat(32)] {
+        let resp = send_from(
+            &f,
+            client,
+            post_open_report(&unknown, &open_body(size, None)),
+        )
+        .await;
+        assert_eq!(
+            error_code(resp).await,
+            (StatusCode::NOT_FOUND, json!("not_found"))
+        );
+    }
+
+    // 500 characters is the most a note may have; blank notes are dropped.
+    let longest = format!("  {}  ", "é".repeat(500));
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&id, &open_body(size, Some(&longest))),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    assert_eq!(
+        job_of(&f, &id).open_report.unwrap().note,
+        Some("é".repeat(500))
+    );
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&id, &open_body(size, Some("   "))),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(job_of(&f, &id).open_report.unwrap().note, None);
+    assert!(report_codes(&f).is_empty());
+}
+
+#[tokio::test]
+async fn open_report_start_again_resumes_the_upload() {
+    let f = setup_with(|c| c.trust_proxy = true);
+    start_workers(&f);
+    let client = "203.0.113.12";
+    let (id, data) = done_from(&f, client).await;
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&id, &open_body(data.len(), None)),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let resp = send_from(&f, client, patch_open_report(&id, 0, &data[..5])).await;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&id, &open_body(data.len(), Some("x"))),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        body_json(resp).await["upload_url"],
+        format!("/api/jobs/{id}/open-report/upload")
+    );
+    let resp = send_from(&f, client, head_open_report(&id)).await;
+    assert_eq!(resp.headers()["upload-offset"], "5");
+}
+
+#[tokio::test]
+async fn open_report_counts_toward_uploads_in_progress() {
+    let f = setup_with(|c| c.trust_proxy = true);
+    start_workers(&f);
+    let client = "203.0.113.13";
+    let (id, data) = done_from(&f, client).await;
+    for _ in 0..2 {
+        let resp = send_from(&f, client, post_job(&job_body("A.rvt", 10, 2026, 2025))).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+    }
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&id, &open_body(data.len(), None)),
+    )
+    .await;
+    assert_eq!(
+        error_code(resp).await,
+        (StatusCode::TOO_MANY_REQUESTS, json!("uploads_in_progress"))
+    );
+}
+
+#[tokio::test]
+async fn open_report_needs_disk_budget_for_the_original() {
+    let dir = tempfile::tempdir().unwrap();
+    let clock = Arc::new(ManualClock::new(
+        chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap(),
+    ));
+    let data = marker_bytes("ok", 2026);
+    let mut state = common::test_state(dir.path(), clock.clone());
+    let mut config = (*state.config).clone();
+    config.trust_proxy = true;
+    state.config = Arc::new(config);
+    // Room for one job while it runs (input + output), and later for its output plus the
+    // original sent again, but not for anything more.
+    state.store = Arc::new(
+        revit_downgrade_server::jobs::JobStore::new(dir.path().to_path_buf(), clock)
+            .with_disk_budget(2 * data.len() as u64),
+    );
+    let f = Fixture {
+        app: app(state.clone()),
+        state,
+        dir,
+    };
+    start_workers(&f);
+    let (id, _) = done_from(&f, "203.0.113.14").await;
+    // Another client's waiting upload takes 2 bytes.
+    let resp = send_from(
+        &f,
+        "203.0.113.15",
+        post_job(&job_body("B.rvt", 1, 2026, 2025)),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let resp = send_from(
+        &f,
+        "203.0.113.14",
+        post_open_report(&id, &open_body(data.len(), None)),
+    )
+    .await;
+    assert_eq!(resp.headers()["retry-after"], "600");
+    assert_eq!(
+        error_code(resp).await,
+        (StatusCode::SERVICE_UNAVAILABLE, json!("server_full"))
+    );
+}
+
+#[tokio::test]
+async fn open_report_finish_refusals() {
+    let f = setup_with(|c| c.trust_proxy = true);
+    start_workers(&f);
+    let client = "203.0.113.16";
+    let (id, data) = done_from(&f, client).await;
+    let resp = send_from(&f, client, finish_open_report(&id)).await;
+    assert_eq!(
+        error_code(resp).await,
+        (StatusCode::NOT_FOUND, json!("not_found"))
+    );
+
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&id, &open_body(data.len(), None)),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let resp = send_from(&f, client, patch_open_report(&id, 0, &data[..3])).await;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    let resp = send_from(&f, client, finish_open_report(&id)).await;
+    assert_eq!(
+        error_code(resp).await,
+        (StatusCode::CONFLICT, json!("upload_incomplete"))
+    );
+    let resp = send_from(&f, client, patch_open_report(&id, 3, &data[3..])).await;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    // A file on disk of another size than counted (should never happen) is refused, and the
+    // upload is closed so that the original can be sent again from the start.
+    let path = f.state.store.report_input_path(&job_of(&f, &id));
+    std::fs::write(&path, [&data[..], b"extra"].concat()).unwrap();
+    let resp = send_from(&f, client, finish_open_report(&id)).await;
+    assert_eq!(
+        error_code(resp).await,
+        (StatusCode::CONFLICT, json!("size_mismatch"))
+    );
+    assert!(job_of(&f, &id).open_report.is_none());
+    assert!(!path.exists());
+    assert_eq!(stats(&f).await["contributed"], 0);
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&id, &open_body(data.len(), None)),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let resp = send_from(&f, client, patch_open_report(&id, 0, &data)).await;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    // Saving fails (the reports directory is a file): the upload stays open for a retry.
+    let reports = f.dir.path().join("reports");
+    let _ = std::fs::remove_dir_all(&reports);
+    std::fs::write(&reports, b"not a directory").unwrap();
+    let resp = send_from(&f, client, finish_open_report(&id)).await;
+    assert_eq!(
+        error_code(resp).await,
+        (StatusCode::INSUFFICIENT_STORAGE, json!("storage_error"))
+    );
+    assert!(job_of(&f, &id).open_report.is_some());
+    assert!(path.is_file());
+    assert_eq!(stats(&f).await["contributed"], 0);
+    std::fs::remove_file(&reports).unwrap();
+
+    let (a, b) = tokio::join!(
+        send_from(&f, client, finish_open_report(&id)),
+        send_from(&f, client, finish_open_report(&id)),
+    );
+    let mut statuses = [a.status().as_u16(), b.status().as_u16()];
+    statuses.sort();
+    assert_eq!(statuses, [201, 409]);
+    assert_eq!(report_codes(&f).len(), 1);
+    let v = stats(&f).await;
+    assert_eq!(
+        (&v["succeeded"], &v["failed"], &v["contributed"]),
+        (&json!(0), &json!(1), &json!(1))
+    );
+
+    let resp = send_from(&f, client, finish_open_report(&id)).await;
+    assert_eq!(
+        error_code(resp).await,
+        (StatusCode::CONFLICT, json!("already_reported"))
+    );
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&id, &open_body(data.len(), None)),
+    )
+    .await;
+    assert_eq!(
+        error_code(resp).await,
+        (StatusCode::CONFLICT, json!("already_reported"))
+    );
+    let resp = send_from(&f, client, patch_open_report(&id, data.len(), b"x")).await;
+    assert_eq!(
+        error_code(resp).await,
+        (StatusCode::CONFLICT, json!("upload_closed"))
+    );
+}
+
+#[tokio::test]
+async fn open_report_input_lost_at_finish_reopens_the_upload() {
+    let f = setup_with(|c| c.trust_proxy = true);
+    start_workers(&f);
+    let client = "203.0.113.17";
+    let (id, data) = done_from(&f, client).await;
+    let open_and_send = || async {
+        let resp = send_from(
+            &f,
+            client,
+            post_open_report(&id, &open_body(data.len(), None)),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::CREATED, "a fresh upload");
+        let resp = send_from(&f, client, patch_open_report(&id, 0, &data)).await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    };
+    open_and_send().await;
+    // The job is still done: losing the file is a storage error, never "expired".
+    std::fs::remove_file(f.state.store.report_input_path(&job_of(&f, &id))).unwrap();
+    let resp = send_from(&f, client, finish_open_report(&id)).await;
+    assert_eq!(
+        error_code(resp).await,
+        (StatusCode::INSUFFICIENT_STORAGE, json!("storage_error"))
+    );
+    assert!(job_of(&f, &id).open_report.is_none());
+    assert!(report_codes(&f).is_empty());
+    assert_eq!(stats(&f).await["contributed"], 0);
+
+    // The retry starts from offset 0 and makes the report.
+    open_and_send().await;
+    let resp = send_from(&f, client, finish_open_report(&id)).await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    assert_eq!(report_codes(&f).len(), 1);
+}
+
+#[tokio::test]
+async fn open_report_finish_on_an_expired_job_is_410() {
+    let f = setup_with(|c| c.trust_proxy = true);
+    start_workers(&f);
+    let client = "203.0.113.21";
+    let (id, data) = done_from(&f, client).await;
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&id, &open_body(data.len(), None)),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let resp = send_from(&f, client, patch_open_report(&id, 0, &data)).await;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    let job_id = job_of(&f, &id).id;
+    f.state.store.expire(&job_id, f.state.clock.now());
+    let resp = send_from(&f, client, finish_open_report(&id)).await;
+    assert_eq!(error_code(resp).await, (StatusCode::GONE, json!("expired")));
+    assert!(report_codes(&f).is_empty());
+    assert_eq!(stats(&f).await["contributed"], 0);
+}
+
+#[tokio::test]
+async fn open_report_allowed_while_the_client_has_a_conversion_running() {
+    let f = setup_with(|c| c.trust_proxy = true);
+    start_workers(&f);
+    let client = "203.0.113.22";
+    let (id, data) = done_from(&f, client).await;
+    // A second conversion of the same client is running: it blocks a new job, not the report.
+    let running = run_from(&f, client, "hang", "running").await;
+    let resp = send_from(&f, client, post_job(&job_body("B.rvt", 10, 2026, 2025))).await;
+    assert_eq!(error_code(resp).await.1, json!("active_job"));
+    let code = report_unopenable(&f, client, &id, &data).await;
+    assert!(report_codes(&f).contains(&code));
+    let resp = send_from(&f, client, delete(&format!("/api/jobs/{running}"))).await;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn open_report_does_not_count_toward_the_hourly_limit() {
+    let f = setup_with(|c| c.trust_proxy = true);
+    start_workers(&f);
+    let client = "203.0.113.18";
+    let (id, data) = done_from(&f, client).await;
+    report_unopenable(&f, client, &id, &data).await;
+    // One job so far this hour: four more are allowed.
+    for _ in 0..4 {
+        let resp = send_from(&f, client, post_job(&job_body("A.rvt", 10, 2026, 2025))).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let new = body_json(resp).await["job_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let resp = send_from(&f, client, delete(&format!("/api/jobs/{new}"))).await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    }
+    let resp = send_from(&f, client, post_job(&job_body("A.rvt", 10, 2026, 2025))).await;
+    assert_eq!(error_code(resp).await.1, json!("hourly_limit"));
+}
+
+#[tokio::test]
+async fn open_report_saved_while_statistics_are_unavailable() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("stats")).unwrap();
+    let file = dir.path().join("stats").join("stats.json");
+    std::fs::write(&file, "{").unwrap();
+    let f = setup_in(dir, |c| c.trust_proxy = true);
+    start_workers(&f);
+    let client = "203.0.113.19";
+    let (id, data) = done_from(&f, client).await;
+    let code = report_unopenable(&f, client, &id, &data).await;
+    assert!(
+        f.dir
+            .path()
+            .join("reports")
+            .join(&code)
+            .join("input.rvt")
+            .is_file()
+    );
+    assert_eq!(std::fs::read(&file).unwrap(), b"{");
+}
+
+#[tokio::test]
+async fn open_report_upload_closed_while_a_report_is_being_written() {
+    let f = setup_with(|c| c.trust_proxy = true);
+    start_workers(&f);
+    let client = "203.0.113.20";
+    let (id, data) = done_from(&f, client).await;
+    let resp = send_from(&f, client, patch_open_report(&id, 0, &data)).await;
+    assert_eq!(
+        error_code(resp).await,
+        (StatusCode::NOT_FOUND, json!("not_found"))
+    );
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&id, &open_body(data.len(), None)),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    // A finish in progress holds the report claim.
+    let claimed = f.state.store.claim_report(
+        &id.parse().unwrap(),
+        revit_downgrade_server::jobs::ReportKind::DoesNotOpen,
+    );
+    assert!(matches!(
+        claimed,
+        revit_downgrade_server::jobs::ReportClaim::Claimed(_)
+    ));
+    let resp = send_from(&f, client, patch_open_report(&id, 0, &data)).await;
+    assert_eq!(
+        error_code(resp).await,
+        (StatusCode::CONFLICT, json!("upload_closed"))
+    );
+}
+
+#[tokio::test]
+async fn open_report_storage_error_keeps_the_job_done() {
+    let f = setup_with(|c| c.trust_proxy = true);
+    start_workers(&f);
+    let client = "203.0.113.21";
+    let (id, data) = done_from(&f, client).await;
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&id, &open_body(data.len(), None)),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let resp = send_from(&f, client, patch_open_report(&id, 0, &data[..4])).await;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    let path = f.state.store.report_input_path(&job_of(&f, &id));
+    assert!(path.is_file());
+    // A directory in place of the partial file makes the next write fail.
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir_all(&path).unwrap();
+    let resp = send_from(&f, client, patch_open_report(&id, 4, &data[4..])).await;
+    assert_eq!(
+        error_code(resp).await,
+        (StatusCode::INSUFFICIENT_STORAGE, json!("storage_error"))
+    );
+    let job = job_of(&f, &id);
+    assert_eq!(job.state, revit_downgrade_server::model::JobState::Done);
+    assert!(job.open_report.is_none());
+    assert!(job.error.is_none());
+    let resp = send(&f, get(&format!("/api/jobs/{id}/file"))).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    // The user starts again.
+    std::fs::remove_dir_all(&path).unwrap();
+    let code = report_unopenable(&f, client, &id, &data).await;
+    assert!(code.starts_with("R-"));
+}
+
+#[tokio::test]
+async fn open_report_counts_survive_a_restart() {
+    let f = setup_with(|c| c.trust_proxy = true);
+    start_workers(&f);
+    let client = "203.0.113.23";
+    let (id, data) = done_from(&f, client).await;
+    run_from(&f, client, "fail", "failed").await;
+    wait_for_stat(&f, "failed", 1).await;
+    let before = wait_for_stat(&f, "succeeded", 1).await;
+    report_unopenable(&f, client, &id, &data).await;
+    let after = stats(&f).await;
+    assert_eq!(
+        (
+            &after["succeeded"],
+            &after["failed"],
+            &after["contributed"],
+            &after["people"]
+        ),
+        (&json!(0), &json!(2), &json!(1), &before["people"])
+    );
+
+    let Fixture { dir, .. } = f;
+    revit_downgrade_server::cleanup::wipe_jobs_dir(dir.path()).unwrap();
+    let f = setup_in(dir, |c| c.trust_proxy = true);
+    assert_eq!(stats(&f).await, after);
+}
+
+#[tokio::test]
+async fn refused_open_reports_leave_the_counts_alone() {
+    let f = setup_with(|c| c.trust_proxy = true);
+    start_workers(&f);
+    let client = "203.0.113.24";
+    let (id, data) = done_from(&f, client).await;
+    let (expiring, _) = done_from(&f, client).await;
+    let before = wait_for_stat(&f, "succeeded", 2).await;
+
+    // Not the original: refused before any byte is taken.
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&id, &open_body(data.len() + 7, None)),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    assert_eq!(stats(&f).await, before);
+
+    // Already reported.
+    report_unopenable(&f, client, &id, &data).await;
+    let reported = stats(&f).await;
+    let resp = send_from(&f, client, finish_open_report(&id)).await;
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&id, &open_body(data.len(), None)),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    assert_eq!(stats(&f).await, reported);
+
+    // Expired, with its upload already sent.
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&expiring, &open_body(data.len(), None)),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let resp = send_from(&f, client, patch_open_report(&expiring, 0, &data)).await;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    assert!(
+        f.state
+            .store
+            .expire(&expiring.parse().unwrap(), f.state.clock.now())
+    );
+    let resp = send_from(&f, client, finish_open_report(&expiring)).await;
+    assert_eq!(resp.status(), StatusCode::GONE);
+    let resp = send_from(
+        &f,
+        client,
+        post_open_report(&expiring, &open_body(data.len(), None)),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::GONE);
+    assert_eq!(stats(&f).await, reported);
+    assert_eq!(report_codes(&f).len(), 1);
 }

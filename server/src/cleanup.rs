@@ -1,4 +1,4 @@
-//! Retention: periodic removal of expired jobs and old reports.
+//! Retention: periodic removal of expired jobs, abandoned uploads and old reports.
 
 use crate::clock::Clock;
 use crate::jobs::JobStore;
@@ -33,6 +33,9 @@ pub fn sweep(store: &JobStore, reports: &Reports, now: DateTime<Utc>) {
             }
             JobState::Done | JobState::Failed if job.expires_at.is_some_and(|t| t < now) => {
                 store.expire(&job.id, now);
+            }
+            JobState::Done if job.open_report.is_some() => {
+                store.close_idle_open_report(&job.id, now);
             }
             JobState::Expired => {
                 store.remove_expired_before(&job.id, now);

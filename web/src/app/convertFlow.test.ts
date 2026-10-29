@@ -139,7 +139,7 @@ describe('conversion card', () => {
     expect(screen.getByText('tower.rvt')).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Revit 2025' })).toBeChecked();
     expect(
-      screen.getByText('Your file is only sent when you press Downgrade. It is deleted after 1 hour.'),
+      screen.getByText('Your file is only sent when you press Downgrade. It is deleted after 2 hours.'),
     ).toBeInTheDocument();
     expect(mocked.createJob).not.toHaveBeenCalled();
 

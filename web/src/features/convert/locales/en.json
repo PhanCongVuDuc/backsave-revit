@@ -1,7 +1,7 @@
 {
   "convert": {
     "title": "Downgrade a Revit file",
-    "lead": "Open a newer model in an older Revit. Free. Your file is deleted after 1 hour.",
+    "lead": "Open a newer model in an older Revit. Free. Your file is deleted after 2 hours.",
     "versions": "Revit 2027 · 2026 · 2025 · 2024 → down to Revit 2023",
     "stats": {
       "label": "Usage so far",
@@ -13,11 +13,11 @@
       "help": "Downgrading Revit files is hard and takes a lot of real data to get right. Every failed file you send helps us fix bugs and keep improving the tool."
     },
     "pageTitle": "Downgrade Revit Files Online (2027 → 2023), Free {'|'} Revit Downgrade",
-    "description": "Free online Revit downgrade: save a Revit 2027, 2026, 2025 or 2024 file (.rvt, .rfa, .rte, .rft) to an older version, down to Revit 2023. Nothing to install. Files are deleted after 1 hour.",
+    "description": "Free online Revit downgrade: save a Revit 2027, 2026, 2025 or 2024 file (.rvt, .rfa, .rte, .rft) to an older version, down to Revit 2023. Nothing to install. Files are deleted after 2 hours.",
     "pairPage": {
       "title": "Downgrade Revit {from} to Revit {to}",
       "pageTitle": "Downgrade Revit {from} to {to} Online, Free {'|'} Revit Downgrade",
-      "description": "Convert a Revit {from} file (.rvt, .rfa, .rte, .rft) so it opens in Revit {to}. Free, nothing to install, files are deleted after 1 hour."
+      "description": "Convert a Revit {from} file (.rvt, .rfa, .rte, .rft) so it opens in Revit {to}. Free, nothing to install, files are deleted after 2 hours."
     },
     "guide": {
       "stepsTitle": "How to downgrade a Revit file",
@@ -46,7 +46,7 @@
           "body": "Works in your browser."
         },
         "deleted": {
-          "title": "Deleted after 1 hour",
+          "title": "Deleted after 2 hours",
           "body": "Your files are never kept or shared."
         },
         "openSource": {
@@ -89,8 +89,8 @@
     },
     "downgrade": "Downgrade",
     "continueUpload": "Continue upload",
-    "privacy": "Your file is only sent when you press Downgrade. It is deleted after 1 hour.",
-    "privacyContinue": "Nothing more is sent until you press Continue upload. The file is deleted after 1 hour.",
+    "privacy": "Your file is only sent when you press Downgrade. It is deleted after 2 hours.",
+    "privacyContinue": "Nothing more is sent until you press Continue upload. The file is deleted after 2 hours.",
     "chooseAnother": "Choose another file",
     "convertAnother": "Convert another file",
     "cancel": "Cancel and delete file",
@@ -147,6 +147,27 @@
       "failed_already_reported": "A report for this file was already sent.",
       "failed_expired": "The file is no longer kept, so it cannot be sent."
     },
+    "unopenable": {
+      "open": "File doesn't open in Revit?",
+      "intro": "If Revit refuses the converted file, send it to us so we can find and fix the problem.",
+      "consent": "Send the original file, the converted file and the conversion log. They are kept for up to 30 days to fix the tool, never shared, and deleted after 30 days or when you ask (you will get a code to quote).",
+      "note": "What does Revit say? (optional)",
+      "pick": "This page no longer holds your original file. Choose the same file you converted:",
+      "send": "Send",
+      "sending": "Sending… {percent}%",
+      "sent": "Thank you. Your report code is {code}. Quote it if you ask for the files to be deleted.",
+      "failed": "The report could not be sent ({code}). Please try again.",
+      "failed_size_mismatch": "This is not the original file of this conversion. Choose the file you converted.",
+      "failed_already_reported": "This conversion was already reported.",
+      "failed_expired": "This conversion is no longer kept, so it cannot be reported here. Please contact the author at the bottom of the page.",
+      "failed_not_found": "This conversion is no longer kept, so it cannot be reported here. Please contact the author at the bottom of the page.",
+      "failed_storage_error": "The server could not save the report. Please try again.",
+      "failed_needs_file": "Choose your original file to send it.",
+      "failed_uploads_in_progress": "You already have uploads in progress. Wait for them to finish, then try again.",
+      "failed_server_full": "The server is busy with other files. Please try again later.",
+      "failed_upload_failed": "The upload was interrupted. Check your connection and try again.",
+      "failed_network": "The server could not be reached. Check your connection and try again."
+    },
     "error": {
       "bad_extension": "This is not a Revit file. Choose a .rvt, .rte, .rfa or .rft file.",
       "too_large": "The file is larger than 1 GB, which is the limit.",
@@ -156,7 +177,7 @@
       "unsupported_year": "Revit {year} files cannot be downgraded yet. Nothing was sent.",
       "unsupported_pair": "This conversion is not supported yet.",
       "server_restarted": "The server was restarted and lost this file. Please choose it again.",
-      "expired": "This conversion has expired and its file was deleted.",
+      "expired": "This conversion has expired and its file was deleted, so it can no longer be reported here. To reach us, use the contact details at the bottom of the page.",
       "cancelled": "The conversion was cancelled.",
       "hourly_limit": "Too many conversions from your network. Try again in {minutes} min.",
       "active_job": "You already have a conversion in progress. Wait for it to finish.",
@@ -192,7 +213,7 @@
         },
         "safe": {
           "q": "Is my file safe?",
-          "a": "Your original file is deleted as soon as the conversion finishes, and the converted file after 1 hour. Files are never shared, and the code that handles them is open source."
+          "a": "Your original file is deleted as soon as the conversion finishes, and the converted file after 2 hours. Files are never shared, and the code that handles them is open source."
         }
       }
     }

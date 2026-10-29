@@ -1,6 +1,8 @@
 //! Resumable uploads: the core of the tus 1.0 protocol (OPTIONS, HEAD, PATCH).
 //!
-//! Uploads are created together with their job (`POST /api/jobs`), so the creation extension is not offered.
+//! Two kinds of upload share one write path: a job's input at `/api/uploads/{id}`, created together with its job
+//! (`POST /api/jobs`), and the original sent again for a "does not open" report at `/api/jobs/{id}/open-report/upload`,
+//! opened by `POST /api/jobs/{id}/open-report`. Neither offers the creation extension.
 
 use crate::AppState;
 use crate::jobs::{Job, JobId};
@@ -14,6 +16,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{options, patch};
 use http_body_util::BodyExt;
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
@@ -23,15 +26,122 @@ const TUS_RESUMABLE: HeaderName = HeaderName::from_static("tus-resumable");
 const UPLOAD_OFFSET: HeaderName = HeaderName::from_static("upload-offset");
 const UPLOAD_LENGTH: HeaderName = HeaderName::from_static("upload-length");
 
-/// Routes for `/api/uploads/{id}`.
+/// Routes for `/api/uploads/{id}` and `/api/jobs/{id}/open-report/upload`.
 pub fn routes() -> Router<AppState> {
     let write = patch(patch_upload).layer(DefaultBodyLimit::disable());
+    let report_write = patch(patch_report_upload).layer(DefaultBodyLimit::disable());
     Router::new()
         .route(
             "/api/uploads/{id}",
             options(options_upload).head(head_upload).merge(write),
         )
+        .route(
+            "/api/jobs/{id}/open-report/upload",
+            options(options_upload)
+                .head(head_report_upload)
+                .merge(report_write),
+        )
         .layer(from_fn(add_tus_header))
+}
+
+/// What an upload writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Target {
+    /// The input of a job waiting for its file.
+    Input,
+    /// The original sent again for a "does not open" report on a done job.
+    ReportInput,
+}
+
+impl Target {
+    /// Finds the job for a path id. For an input, unknown, malformed and expired ids are all "not found"; for a report
+    /// input, an expired job is "expired" and a job without an open report is "not found".
+    fn find(self, state: &AppState, raw: &str) -> Result<Job, ApiError> {
+        let id: JobId = raw.parse().map_err(|_| not_found())?;
+        let job = state.store.get(&id);
+        match (self, job) {
+            (Target::Input, Some(job)) if job.state != JobState::Expired => Ok(job),
+            (Target::ReportInput, Some(job)) if job.state == JobState::Expired => Err(
+                ApiError::new(StatusCode::GONE, "expired", "This job has expired."),
+            ),
+            (Target::ReportInput, Some(job)) => Ok(job),
+            _ => Err(not_found()),
+        }
+    }
+
+    /// Whether the upload takes data now. A finished, failed or cancelled job's input, or a report that is being
+    /// written or already exists, takes no more: saying so stops the client from resuming at a stale offset.
+    fn accepting(self, job: &Job) -> Result<(), ApiError> {
+        match self {
+            Target::Input if job.state == JobState::WaitingUpload => Ok(()),
+            Target::Input => Err(closed()),
+            Target::ReportInput if job.reporting || job.report_code.is_some() => Err(closed()),
+            Target::ReportInput if job.open_report.is_none() => Err(not_found()),
+            Target::ReportInput if job.state == JobState::Done => Ok(()),
+            Target::ReportInput => Err(closed()),
+        }
+    }
+
+    fn received(self, job: &Job) -> u64 {
+        match self {
+            Target::Input => job.received,
+            Target::ReportInput => job.open_report.as_ref().map_or(0, |o| o.received),
+        }
+    }
+
+    fn path(self, state: &AppState, job: &Job) -> PathBuf {
+        match self {
+            Target::Input => state.store.input_path(job),
+            Target::ReportInput => state.store.report_input_path(job),
+        }
+    }
+
+    /// Counts accepted bytes and returns the new total.
+    fn add_received(self, state: &AppState, id: &JobId, n: u64) -> u64 {
+        match self {
+            Target::Input => state.store.add_received(id, n),
+            Target::ReportInput => state.store.open_report_add_received(id, n),
+        }
+    }
+
+    /// Gives up after the file could not be stored and builds the 507 answer. A job's input fails the job as "disk
+    /// full"; a report input only closes the open report (the job stays done) and the user can start it again.
+    fn storage_error(self, state: &AppState, job: &Job) -> ApiError {
+        let message = "The server could not store the file.";
+        match self {
+            Target::Input => {
+                remove_partial(&state.store.input_path(job));
+                tracing::warn!(
+                    job_id = %job.id,
+                    kind = "disk_full",
+                    size_mib = job.size.div_ceil(1 << 20),
+                    "upload could not be stored"
+                );
+                state
+                    .store
+                    .set_failed_upload(&job.id, ErrorKind::DiskFull, message.into());
+            }
+            Target::ReportInput => {
+                remove_partial(&state.store.report_input_path(job));
+                tracing::warn!(
+                    job_id = %job.id,
+                    size_mib = job.size.div_ceil(1 << 20),
+                    "report upload could not be stored"
+                );
+                state.store.open_report_close(&job.id);
+            }
+        }
+        ApiError::new(StatusCode::INSUFFICIENT_STORAGE, "storage_error", message)
+    }
+
+    /// Runs once every byte has arrived.
+    fn complete(self, state: &AppState, id: &JobId) {
+        match self {
+            Target::Input => state.store.mark_uploaded(id),
+            // The report is made by `POST /api/jobs/{id}/open-report/finish`.
+            Target::ReportInput => {}
+        }
+    }
 }
 
 async fn add_tus_header(req: Request, next: Next) -> Response {
@@ -85,15 +195,6 @@ fn too_large() -> ApiError {
     )
 }
 
-/// Finds the job for a path id. Unknown, malformed and expired ids are all "not found".
-fn find_job(state: &AppState, raw: &str) -> Result<Job, ApiError> {
-    let id: JobId = raw.parse().map_err(|_| not_found())?;
-    match state.store.get(&id) {
-        Some(job) if job.state != JobState::Expired => Ok(job),
-        _ => Err(not_found()),
-    }
-}
-
 async fn options_upload() -> Response {
     let mut resp = StatusCode::NO_CONTENT.into_response();
     let h = resp.headers_mut();
@@ -107,39 +208,34 @@ async fn head_upload(
     State(state): State<AppState>,
     Path(raw): Path<String>,
 ) -> Result<Response, ApiError> {
-    let job = find_job(&state, &raw)?;
-    // A finished, failed or cancelled upload takes no more data; saying so stops the client from
-    // resuming at a stale offset.
-    if job.state != JobState::WaitingUpload {
-        return Err(closed());
-    }
+    head(&state, &raw, Target::Input)
+}
+
+async fn head_report_upload(
+    State(state): State<AppState>,
+    Path(raw): Path<String>,
+) -> Result<Response, ApiError> {
+    head(&state, &raw, Target::ReportInput)
+}
+
+fn head(state: &AppState, raw: &str, target: Target) -> Result<Response, ApiError> {
+    let job = target.find(state, raw)?;
+    target.accepting(&job)?;
     let mut resp = StatusCode::OK.into_response();
     let h = resp.headers_mut();
-    h.insert(UPLOAD_OFFSET, HeaderValue::from(job.received));
+    h.insert(UPLOAD_OFFSET, HeaderValue::from(target.received(&job)));
     h.insert(UPLOAD_LENGTH, HeaderValue::from(job.size));
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok(resp)
 }
 
-/// Deletes the partial input, fails the job as "disk full" and builds the 507 answer.
-fn storage_error(state: &AppState, job: &Job) -> ApiError {
-    let path = state.store.input_path(job);
-    if std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_file())
-        && let Err(e) = std::fs::remove_file(&path)
+/// Deletes a partial file, if it is one.
+fn remove_partial(path: &std::path::Path) {
+    if std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file())
+        && let Err(e) = std::fs::remove_file(path)
     {
         tracing::warn!(error = ?e.kind(), "could not remove partial upload");
     }
-    let message = "The server could not store the file.";
-    tracing::warn!(
-        job_id = %job.id,
-        kind = "disk_full",
-        size_mib = job.size.div_ceil(1 << 20),
-        "upload could not be stored"
-    );
-    state
-        .store
-        .set_failed_upload(&job.id, ErrorKind::DiskFull, message.into());
-    ApiError::new(StatusCode::INSUFFICIENT_STORAGE, "storage_error", message)
 }
 
 async fn patch_upload(
@@ -148,10 +244,27 @@ async fn patch_upload(
     headers: HeaderMap,
     body: Body,
 ) -> Result<Response, ApiError> {
-    let job = find_job(&state, &raw)?;
-    if job.state != JobState::WaitingUpload {
-        return Err(closed());
-    }
+    patch_target(&state, &raw, &headers, body, Target::Input).await
+}
+
+async fn patch_report_upload(
+    State(state): State<AppState>,
+    Path(raw): Path<String>,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Response, ApiError> {
+    patch_target(&state, &raw, &headers, body, Target::ReportInput).await
+}
+
+async fn patch_target(
+    state: &AppState,
+    raw: &str,
+    headers: &HeaderMap,
+    body: Body,
+    target: Target,
+) -> Result<Response, ApiError> {
+    let job = target.find(state, raw)?;
+    target.accepting(&job)?;
     let header_str = |name: &HeaderName| headers.get(name).and_then(|v| v.to_str().ok());
     if header_str(&TUS_RESUMABLE) != Some(TUS_VERSION) {
         return Err(ApiError::new(
@@ -188,11 +301,10 @@ async fn patch_upload(
         )
     })?;
     // Read again under the guard: a request that just finished may have moved the offset or closed the upload.
-    let job = find_job(&state, &raw)?;
-    if job.state != JobState::WaitingUpload {
-        return Err(closed());
-    }
-    if offset != job.received {
+    let job = target.find(state, raw)?;
+    target.accepting(&job)?;
+    let already = target.received(&job);
+    if offset != already {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
             "offset_mismatch",
@@ -200,11 +312,11 @@ async fn patch_upload(
         ));
     }
     let declared = header_str(&header::CONTENT_LENGTH).and_then(|v| v.parse::<u64>().ok());
-    if declared.is_some_and(|n| n > job.size - job.received) {
+    if declared.is_some_and(|n| n > job.size - already) {
         return Err(too_large());
     }
 
-    let path = state.store.input_path(&job);
+    let path = target.path(state, &job);
     let mut file = match tokio::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -212,12 +324,12 @@ async fn patch_upload(
         .await
     {
         Ok(f) => f,
-        Err(_) => return Err(storage_error(&state, &job)),
+        Err(_) => return Err(target.storage_error(state, &job)),
     };
-    let received = write_body(&state, &job, &mut file, body).await?;
+    let received = write_body(state, &job, target, &mut file, body).await?;
     drop(file);
     if received == job.size {
-        state.store.mark_uploaded(&job.id);
+        target.complete(state, &job.id);
     }
     let mut resp = StatusCode::NO_CONTENT.into_response();
     resp.headers_mut()
@@ -226,17 +338,19 @@ async fn patch_upload(
 }
 
 /// Appends the body to `writer`, flushing each chunk before it is counted, so `received` only ever covers
-/// bytes the writer accepted. Any write or flush failure removes the partial input and fails the job.
+/// bytes the writer accepted. Any write or flush failure removes the partial file and gives up on the upload
+/// (see `Target::storage_error`).
 async fn write_body<W>(
     state: &AppState,
     job: &Job,
+    target: Target,
     writer: &mut W,
     mut body: Body,
 ) -> Result<u64, ApiError>
 where
     W: AsyncWrite + Unpin,
 {
-    let mut received = job.received;
+    let mut received = target.received(job);
     while let Some(frame) = body.frame().await {
         let Ok(frame) = frame else {
             // The client went away; what was counted stays on disk and HEAD reports it.
@@ -253,9 +367,9 @@ where
             return Err(too_large());
         }
         if writer.write_all(&chunk).await.is_err() || writer.flush().await.is_err() {
-            return Err(storage_error(state, job));
+            return Err(target.storage_error(state, job));
         }
-        received = state.store.add_received(&job.id, chunk.len() as u64);
+        received = target.add_received(state, &job.id, chunk.len() as u64);
     }
     Ok(received)
 }
@@ -296,15 +410,14 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn failed_second_write_removes_partial_file_and_fails_job() {
-        let dir = tempfile::tempdir().unwrap();
+    fn test_state(dir: &tempfile::TempDir) -> AppState {
         let clock = Arc::new(ManualClock::new(
             chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap(),
         ));
         let config =
-            Config::from_lookup(|k| (k == "REVIT_DOWNGRADE_ENGINE").then(|| "x".to_string())).unwrap();
-        let state = AppState {
+            Config::from_lookup(|k| (k == "REVIT_DOWNGRADE_ENGINE").then(|| "x".to_string()))
+                .unwrap();
+        AppState {
             store: Arc::new(JobStore::new(dir.path().to_path_buf(), clock.clone())),
             engine: Arc::new(Engine::new("x")),
             config: Arc::new(config),
@@ -316,7 +429,10 @@ mod tests {
                 chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap(),
             )),
             engine_version: Arc::new("x".to_string()),
-        };
+        }
+    }
+
+    fn new_job(state: &AppState) -> Job {
         let req = NewJob {
             name: "a.rvt".into(),
             size: 100,
@@ -324,23 +440,34 @@ mod tests {
             year: 2026,
             target: 2024,
         };
-        let job = state
+        state
             .store
             .create(req, std::net::IpAddr::from([10, 0, 0, 1]), &state.pairs)
-            .unwrap();
-        // Bytes from an earlier chunk are already on disk.
-        let input = state.store.input_path(&job);
-        std::fs::write(&input, b"earlier").unwrap();
+            .unwrap()
+    }
 
+    /// A body of two chunks, "one" then "two".
+    async fn two_chunks() -> Body {
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, io::Error>>(4);
         tx.send(Ok(b"one".to_vec())).await.unwrap();
         tx.send(Ok(b"two".to_vec())).await.unwrap();
         drop(tx);
-        let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
             rx.recv().await.map(|item| (item, rx))
-        });
+        }))
+    }
+
+    #[tokio::test]
+    async fn failed_second_write_removes_partial_file_and_fails_job() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(&dir);
+        let job = new_job(&state);
+        // Bytes from an earlier chunk are already on disk.
+        let input = state.store.input_path(&job);
+        std::fs::write(&input, b"earlier").unwrap();
+
         let mut writer = FailsOnSecondWrite(0);
-        let err = write_body(&state, &job, &mut writer, Body::from_stream(stream))
+        let err = write_body(&state, &job, Target::Input, &mut writer, two_chunks().await)
             .await
             .unwrap_err();
 
@@ -350,5 +477,42 @@ mod tests {
         assert_eq!(after.error.unwrap().kind, ErrorKind::DiskFull);
         assert_eq!(after.received, 3, "only the accepted chunk is counted");
         assert!(!input.exists(), "partial input must be removed");
+    }
+
+    #[tokio::test]
+    async fn failed_report_write_removes_partial_file_and_keeps_job_done() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(&dir);
+        let job = new_job(&state);
+        state.store.mark_uploaded(&job.id);
+        state.store.take_next().unwrap();
+        state.store.finish_done(&job.id, Vec::new(), 10);
+        let ip = std::net::IpAddr::from([10, 0, 0, 1]);
+        state
+            .store
+            .open_report_start(&job.id, 100, None, ip)
+            .unwrap();
+        let job = state.store.get(&job.id).unwrap();
+        let partial = state.store.report_input_path(&job);
+        std::fs::write(&partial, b"earlier").unwrap();
+
+        let mut writer = FailsOnSecondWrite(0);
+        let err = write_body(
+            &state,
+            &job,
+            Target::ReportInput,
+            &mut writer,
+            two_chunks().await,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.status, StatusCode::INSUFFICIENT_STORAGE);
+        assert_eq!(err.code, "storage_error");
+        let after = state.store.get(&job.id).unwrap();
+        assert_eq!(after.state, JobState::Done);
+        assert!(after.error.is_none());
+        assert!(after.open_report.is_none());
+        assert!(!partial.exists(), "partial report input must be removed");
     }
 }

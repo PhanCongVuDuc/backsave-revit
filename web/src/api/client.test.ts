@@ -1,6 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError, createJob, deleteJob, getDropped, getInfo, getJob, getStats, sendReport, uploadFile } from './index';
+import {
+  ApiError,
+  createJob,
+  deleteJob,
+  finishOpenReport,
+  getDropped,
+  getInfo,
+  getJob,
+  getStats,
+  sendReport,
+  startOpenReport,
+  uploadFile,
+} from './index';
 import { shouldRetryUpload } from './upload';
 
 interface FakeUpload {
@@ -185,6 +197,42 @@ describe('api client', () => {
       `POST /api/jobs/${id}/report`,
     ]);
     expect(JSON.parse(fetchMock.mock.calls[2]?.[1]?.body as string)).toEqual({ consent: true });
+  });
+
+  it('opens and finishes a "does not open" report', async () => {
+    const id = 'd'.repeat(32);
+    fetchMock
+      .mockResolvedValueOnce(json(201, { upload_url: `/api/jobs/${id}/open-report/upload` }))
+      .mockResolvedValueOnce(json(200, { upload_url: `/api/jobs/${id}/open-report/upload` }))
+      .mockResolvedValueOnce(json(201, { report_code: 'R-7K2M9Q' }));
+    await expect(startOpenReport(id, 1234, 'Revit says corrupt')).resolves.toBe(`/api/jobs/${id}/open-report/upload`);
+    await expect(startOpenReport(id, 1234)).resolves.toBe(`/api/jobs/${id}/open-report/upload`);
+    await expect(finishOpenReport(id)).resolves.toBe('R-7K2M9Q');
+    expect(fetchMock.mock.calls.map(([url, init]) => `${String(init?.method)} ${url as string}`)).toEqual([
+      `POST /api/jobs/${id}/open-report`,
+      `POST /api/jobs/${id}/open-report`,
+      `POST /api/jobs/${id}/open-report/finish`,
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
+      consent: true,
+      size: 1234,
+      note: 'Revit says corrupt',
+    });
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).toEqual({ consent: true, size: 1234 });
+  });
+
+  it('rejects a refused "does not open" report with the server code', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        json(409, { error: { code: 'size_mismatch', message: 'Not the original.', retry_after_s: null } }),
+      )
+      .mockResolvedValueOnce(
+        json(409, { error: { code: 'already_reported', message: 'Already reported.', retry_after_s: null } }),
+      );
+    const started = await apiErrorOf(startOpenReport('e'.repeat(32), 1));
+    expect([started.status, started.code]).toEqual([409, 'size_mismatch']);
+    const finished = await apiErrorOf(finishOpenReport('e'.repeat(32)));
+    expect([finished.status, finished.code]).toEqual([409, 'already_reported']);
   });
 });
 

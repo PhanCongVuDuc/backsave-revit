@@ -46,6 +46,9 @@ watchEffect(() => {
       </tbody>
     </table>
 
+    <h2>{{ t('about.unopenable.title') }}</h2>
+    <p>{{ t('about.unopenable.body') }}</p>
+
     <h2>{{ t('about.cookies.title') }}</h2>
     <p>{{ t('about.cookies.body') }}</p>
 

@@ -6,6 +6,7 @@ import {
   createJob,
   deleteJob,
   type DroppedElement,
+  finishOpenReport,
   getDropped,
   getInfo,
   getJob,
@@ -13,6 +14,7 @@ import {
   type JobStatus,
   sendReport,
   type ServerInfo,
+  startOpenReport,
   uploadFile,
 } from '@/api';
 import { readRevitFileInfo, RevitFileError, type RevitFileInfo } from '@/shared/revit-file/readRevitFileInfo';
@@ -55,6 +57,17 @@ export const useConvertStore = defineStore('convert', () => {
   const reportCode = ref<string | null>(null);
   /** Why the last report request failed: the ApiError code, or `network`. */
   const reportError = ref<string | null>(null);
+  /** The size of the file the current job was made from, from the server. */
+  const jobSize = ref<number | null>(null);
+  /** A "does not open in Revit" report is being sent. */
+  const unopenableSending = ref(false);
+  /** Upload progress of the original sent with that report, 0 to 1. */
+  const unopenableProgress = ref(0);
+  /**
+   * Why the last "does not open" report failed: `needs_file` (no file to send), an API code (`size_mismatch`,
+   * `already_reported`, `expired`, `not_found`, `storage_error`, `uploads_in_progress`, `server_full`, …), or `network`.
+   */
+  const unopenableError = ref<string | null>(null);
   const jobId = ref<string | null>(null);
   /** Why the dropped list of a done job could not be loaded; `dropped` stays null then. */
   const droppedError = ref<string | null>(null);
@@ -65,6 +78,10 @@ export const useConvertStore = defineStore('convert', () => {
   /** This tab created the job, or continued its upload; only such a job is deleted by `cancel`. */
   const ownsJob = ref(false);
   const downloadUrl = computed(() => (jobId.value !== null && result.value !== null ? jobFileUrl(jobId.value) : null));
+  /** The tab still holds the file the job was made from, so a report can send it without asking for it again. */
+  const canReuseFile = computed(
+    () => file.value !== null && jobSize.value !== null && file.value.size === jobSize.value,
+  );
 
   const serverInfo = shallowRef<ServerInfo | null>(null);
   let loading: Promise<ServerInfo> | null = null;
@@ -77,6 +94,8 @@ export const useConvertStore = defineStore('convert', () => {
   // The expiry time already scheduled, so a server that still says done after it does not cause a loop.
   let expiryScheduledFor: string | null = null;
   let uploadAbort: AbortController | null = null;
+  // The upload of the original for a "does not open" report.
+  let reportAbort: AbortController | null = null;
   let uploadedThisSession = false;
   // The tus URL of the current job, kept so an upload that gave up can be resumed with retryUpload().
   let uploadUrl: string | null = null;
@@ -162,6 +181,9 @@ export const useConvertStore = defineStore('convert', () => {
     expiryScheduledFor = null;
     uploadAbort?.abort();
     uploadAbort = null;
+    reportAbort?.abort();
+    reportAbort = null;
+    unopenableSending.value = false;
     uploadedThisSession = false;
   }
 
@@ -175,6 +197,10 @@ export const useConvertStore = defineStore('convert', () => {
     error.value = null;
     reportCode.value = null;
     reportError.value = null;
+    jobSize.value = null;
+    unopenableSending.value = false;
+    unopenableProgress.value = 0;
+    unopenableError.value = null;
     droppedError.value = null;
     result.value = null;
     jobId.value = null;
@@ -373,6 +399,7 @@ export const useConvertStore = defineStore('convert', () => {
     estimateS.value = current.estimateS;
     expiresAt.value = current.expiresAt;
     reportCode.value = current.reportCode;
+    jobSize.value = current.size;
     result.value = current.result;
     if (current.state !== 'waiting_upload') {
       uploads.remove(id);
@@ -634,6 +661,91 @@ export const useConvertStore = defineStore('convert', () => {
     }
   }
 
+  /**
+   * Reports that the done job's file does not open in Revit, once: sends the original (`picked`, else the file this tab
+   * still holds for the job) and resolves to whether a report code was received. Without a file to send, sets
+   * `unopenableError` to `needs_file`.
+   */
+  async function reportUnopenable(note: string, picked?: File): Promise<boolean> {
+    const id = jobId.value;
+    if (phase.value !== 'done' || !id || reportCode.value !== null || unopenableSending.value) {
+      return false;
+    }
+    const chosen = picked ?? (canReuseFile.value ? file.value : null);
+    if (!chosen) {
+      unopenableError.value = 'needs_file';
+      return false;
+    }
+    const token = session;
+    const controller = new AbortController();
+    reportAbort = controller;
+    unopenableSending.value = true;
+    unopenableProgress.value = 0;
+    unopenableError.value = null;
+    const trimmed = note.trim();
+    try {
+      const url = await startOpenReport(id, chosen.size, trimmed === '' ? undefined : trimmed);
+      await uploadFile(chosen, url, {
+        signal: controller.signal,
+        onProgress: (sent, total) => {
+          if (token === session) {
+            unopenableProgress.value = total > 0 ? sent / total : 0;
+          }
+        },
+      });
+      const code = await finishOpenReport(id);
+      if (token === session) {
+        reportCode.value = code;
+      }
+      return true;
+    } catch (cause) {
+      if (token === session) {
+        const failure = await reportFailureCode(id, cause, token);
+        if (token === session) {
+          unopenableError.value = failure;
+        }
+      }
+      return false;
+    } finally {
+      if (token === session) {
+        reportAbort = null;
+        unopenableSending.value = false;
+      }
+    }
+  }
+
+  /**
+   * The code a failed "does not open" report shows. An upload refused as gone asks the server whether the job is; an
+   * upload closed under it, or a report refused as already sent (another tab won), asks for the job's report code so
+   * that it can be shown (`token` guards against a session that changed meanwhile).
+   */
+  async function reportFailureCode(id: string, cause: unknown, token: number): Promise<string> {
+    const code = codeOf(cause);
+    if (code === 'upload_closed' || code === 'already_reported') {
+      try {
+        const current = await getJob(id);
+        if (current.reportCode !== null) {
+          if (token === session) {
+            reportCode.value = current.reportCode;
+          }
+          return 'already_reported';
+        }
+      } catch {
+        // The answer below still says what happened to this request.
+      }
+      return code;
+    }
+    if (code !== 'job_gone') {
+      return code;
+    }
+    try {
+      await getJob(id);
+      return 'upload_failed';
+    } catch (again) {
+      return again instanceof ApiError && again.status === 410 ? 'expired' : codeOf(again);
+    }
+  }
+
   /** Follows the job of a `/job/:id` link: view and download, never deleted unless the user presses Delete now. */
   async function resume(id?: string): Promise<boolean> {
     if (!id || !JOB_ID.test(id)) {
@@ -669,6 +781,11 @@ export const useConvertStore = defineStore('convert', () => {
     error,
     reportCode,
     reportError,
+    jobSize,
+    canReuseFile,
+    unopenableSending,
+    unopenableProgress,
+    unopenableError,
     jobId,
     continuing,
     ownsJob,
@@ -683,6 +800,7 @@ export const useConvertStore = defineStore('convert', () => {
     cancel,
     deleteNow,
     consentReport,
+    reportUnopenable,
     resume,
     $reset,
   };

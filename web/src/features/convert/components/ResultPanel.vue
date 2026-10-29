@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import BaseButton from '@/shared/ui/BaseButton.vue';
@@ -6,6 +7,7 @@ import BaseButton from '@/shared/ui/BaseButton.vue';
 import type { DroppedItem } from '../dropped';
 import { formatBytes, formatTimeOfDay } from '../format';
 import DroppedTable from './DroppedTable.vue';
+import UnopenablePanel from './UnopenablePanel.vue';
 
 defineProps<{
   fileName: string;
@@ -16,9 +18,20 @@ defineProps<{
   dropped: DroppedItem[] | null;
   droppedError: string | null;
   expiresAt: string | null;
+  /** The "does not open in Revit" report already sent for this job, if any. */
+  reportCode: string | null;
+  canReuseFile: boolean;
+  reportSending: boolean;
+  reportProgress: number;
+  reportError: string | null;
 }>();
-const emit = defineEmits<{ deleteNow: []; convertAnother: [] }>();
+const emit = defineEmits<{
+  deleteNow: [];
+  convertAnother: [];
+  reportUnopenable: [note: string, file: File | undefined];
+}>();
 const { t, locale } = useI18n();
+const reporting = ref(false);
 </script>
 
 <template>
@@ -32,6 +45,18 @@ const { t, locale } = useI18n();
     <DroppedTable v-if="dropped" :items="dropped" />
     <p v-else-if="droppedError" class="muted" role="status">{{ t('convert.dropped.loadFailed') }}</p>
     <p v-else class="muted">{{ t('convert.dropped.loading') }}</p>
+    <UnopenablePanel
+      v-if="reportCode || reporting"
+      :report-code="reportCode"
+      :can-reuse-file="canReuseFile"
+      :sending="reportSending"
+      :progress="reportProgress"
+      :error="reportError"
+      @send="(note, file) => emit('reportUnopenable', note, file)"
+    />
+    <BaseButton v-else variant="link" class="unopenable" @click="reporting = true">
+      {{ t('convert.unopenable.open') }}
+    </BaseButton>
     <p class="muted footer">
       <span v-if="expiresAt">{{ t('convert.result.expires', { time: formatTimeOfDay(expiresAt, locale) }) }}</span>
       <BaseButton variant="link" @click="emit('deleteNow')">{{ t('convert.result.deleteNow') }}</BaseButton>
@@ -68,6 +93,10 @@ const { t, locale } = useI18n();
   margin: 0;
   color: var(--color-text-muted);
   font-size: 0.8125rem;
+}
+
+.unopenable {
+  justify-self: start;
 }
 
 .footer {

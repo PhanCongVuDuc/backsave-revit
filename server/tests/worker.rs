@@ -116,7 +116,7 @@ async fn ok_job_done_input_deleted_output_kept() {
     assert_eq!(done.state, JobState::Done);
     assert_eq!(
         done.expires_at.unwrap() - done.finished_at.unwrap(),
-        chrono::Duration::hours(1)
+        chrono::Duration::hours(2)
     );
     assert!(!f.state.store.input_path(&job).exists());
     assert!(f.state.store.output_path(&job).exists());

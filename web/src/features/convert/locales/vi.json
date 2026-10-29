@@ -1,7 +1,7 @@
 {
   "convert": {
     "title": "Hạ phiên bản file Revit",
-    "lead": "Mở model mới bằng Revit cũ. Miễn phí. File tự xoá sau 1 giờ.",
+    "lead": "Mở model mới bằng Revit cũ. Miễn phí. File tự xoá sau 2 giờ.",
     "versions": "Revit 2027 · 2026 · 2025 · 2024 → xuống tới Revit 2023",
     "stats": {
       "label": "Số liệu sử dụng",
@@ -13,11 +13,11 @@
       "help": "Hạ phiên bản file Revit rất khó và cần nhiều dữ liệu thật để làm đúng. Mỗi file lỗi bạn gửi giúp chúng tôi sửa lỗi và cải thiện công cụ liên tục."
     },
     "pageTitle": "Hạ phiên bản file Revit online (2027 → 2023), miễn phí {'|'} Revit Downgrade",
-    "description": "Hạ phiên bản file Revit miễn phí: chuyển file Revit 2027, 2026, 2025, 2024 (.rvt, .rfa, .rte, .rft) về bản cũ hơn, xuống tới Revit 2023. Không cần cài đặt. File tự xoá sau 1 giờ.",
+    "description": "Hạ phiên bản file Revit miễn phí: chuyển file Revit 2027, 2026, 2025, 2024 (.rvt, .rfa, .rte, .rft) về bản cũ hơn, xuống tới Revit 2023. Không cần cài đặt. File tự xoá sau 2 giờ.",
     "pairPage": {
       "title": "Hạ file Revit {from} về Revit {to}",
       "pageTitle": "Hạ file Revit {from} về {to} online, miễn phí {'|'} Revit Downgrade",
-      "description": "Chuyển file Revit {from} (.rvt, .rfa, .rte, .rft) để mở được bằng Revit {to}. Miễn phí, không cần cài đặt, file tự xoá sau 1 giờ."
+      "description": "Chuyển file Revit {from} (.rvt, .rfa, .rte, .rft) để mở được bằng Revit {to}. Miễn phí, không cần cài đặt, file tự xoá sau 2 giờ."
     },
     "guide": {
       "stepsTitle": "Cách hạ phiên bản file Revit",
@@ -46,7 +46,7 @@
           "body": "Chạy ngay trên trình duyệt."
         },
         "deleted": {
-          "title": "Xoá sau 1 giờ",
+          "title": "Xoá sau 2 giờ",
           "body": "File không bị giữ hay chia sẻ."
         },
         "openSource": {
@@ -89,8 +89,8 @@
     },
     "downgrade": "Hạ phiên bản",
     "continueUpload": "Tải lên tiếp",
-    "privacy": "File chỉ được gửi lên khi bạn bấm Hạ phiên bản. File tự xoá sau 1 giờ.",
-    "privacyContinue": "Không gửi thêm gì cho tới khi bạn bấm Tải lên tiếp. File tự xoá sau 1 giờ.",
+    "privacy": "File chỉ được gửi lên khi bạn bấm Hạ phiên bản. File tự xoá sau 2 giờ.",
+    "privacyContinue": "Không gửi thêm gì cho tới khi bạn bấm Tải lên tiếp. File tự xoá sau 2 giờ.",
     "chooseAnother": "Chọn file khác",
     "convertAnother": "Hạ file khác",
     "cancel": "Huỷ và xoá file",
@@ -147,6 +147,27 @@
       "failed_already_reported": "Báo cáo cho file này đã được gửi.",
       "failed_expired": "File không còn được giữ nên không thể gửi."
     },
+    "unopenable": {
+      "open": "File không mở được trong Revit?",
+      "intro": "Nếu Revit không mở được file đã hạ, hãy gửi cho chúng tôi để tìm và sửa lỗi.",
+      "consent": "Gửi file gốc, file đã hạ và nhật ký chuyển đổi. Các file chỉ dùng để sửa công cụ, được giữ tối đa 30 ngày, không chia sẻ, và bị xoá sau 30 ngày hoặc khi bạn yêu cầu (bạn sẽ nhận một mã để nêu khi yêu cầu).",
+      "note": "Revit báo gì? (không bắt buộc)",
+      "pick": "Trang này không còn giữ file gốc của bạn. Hãy chọn lại đúng file bạn đã hạ:",
+      "send": "Gửi",
+      "sending": "Đang gửi… {percent}%",
+      "sent": "Cảm ơn bạn. Mã báo cáo của bạn là {code}. Hãy nêu mã này nếu bạn muốn xoá file.",
+      "failed": "Không gửi được báo cáo ({code}). Vui lòng thử lại.",
+      "failed_size_mismatch": "Đây không phải file gốc của lần hạ này. Hãy chọn đúng file bạn đã hạ.",
+      "failed_already_reported": "Lần hạ này đã được báo.",
+      "failed_expired": "Lần hạ này không còn được giữ nên không báo được ở đây nữa. Vui lòng liên hệ tác giả ở chân trang.",
+      "failed_not_found": "Lần hạ này không còn được giữ nên không báo được ở đây nữa. Vui lòng liên hệ tác giả ở chân trang.",
+      "failed_storage_error": "Máy chủ không lưu được báo cáo. Vui lòng thử lại.",
+      "failed_needs_file": "Hãy chọn file gốc để gửi.",
+      "failed_uploads_in_progress": "Bạn đang có file tải lên chưa xong. Hãy đợi xong rồi thử lại.",
+      "failed_server_full": "Máy chủ đang bận với các file khác. Vui lòng thử lại sau.",
+      "failed_upload_failed": "Việc tải lên bị gián đoạn. Hãy kiểm tra kết nối rồi thử lại.",
+      "failed_network": "Không kết nối được máy chủ. Hãy kiểm tra kết nối rồi thử lại."
+    },
     "error": {
       "bad_extension": "Đây không phải file Revit. Hãy chọn file .rvt, .rte, .rfa hoặc .rft.",
       "too_large": "File lớn hơn 1 GB, là giới hạn hiện tại.",
@@ -156,7 +177,7 @@
       "unsupported_year": "File Revit {year} chưa hạ được. Chưa có gì được gửi đi.",
       "unsupported_pair": "Phép chuyển đổi này chưa được hỗ trợ.",
       "server_restarted": "Máy chủ đã khởi động lại và mất file này. Vui lòng chọn lại file.",
-      "expired": "Phiên chuyển đổi này đã hết hạn và file đã bị xoá.",
+      "expired": "Phiên chuyển đổi này đã hết hạn và file đã bị xoá, nên không báo được ở đây nữa. Muốn liên hệ, hãy dùng thông tin ở chân trang.",
       "cancelled": "Phiên chuyển đổi đã bị huỷ.",
       "hourly_limit": "Mạng của bạn đã chuyển đổi quá nhiều lần. Hãy thử lại sau {minutes} phút.",
       "active_job": "Bạn đang có một phiên chuyển đổi chạy. Hãy đợi nó xong.",
@@ -192,7 +213,7 @@
         },
         "safe": {
           "q": "File của tôi có an toàn không?",
-          "a": "File gốc bị xoá ngay khi hạ xong, file đã hạ bị xoá sau 1 giờ. File không được chia sẻ, và mã xử lý file là mã nguồn mở."
+          "a": "File gốc bị xoá ngay khi hạ xong, file đã hạ bị xoá sau 2 giờ. File không được chia sẻ, và mã xử lý file là mã nguồn mở."
         }
       }
     }

@@ -3,6 +3,9 @@
 //! `stats.json` holds the start date, the succeeded, failed and reported conversion counts,
 //! and one keyed hash per client network address. `key` holds the secret for that hash. No
 //! address, file name or file content is ever stored here.
+//!
+//! The counts only grow, with one exception: a success later reported as not opening in Revit
+//! moves to the failures (`record_unopenable`).
 
 use crate::jobs::rate_key;
 use chrono::{DateTime, NaiveDate, Utc};
@@ -132,6 +135,17 @@ impl Stats {
     /// Counts one saved failure report.
     pub fn record_contribution(&self) {
         self.change(|a| a.totals.contributed += 1);
+    }
+
+    /// Counts a converted file the user reported as not opening in Revit: one success becomes a
+    /// failure (never below zero) and one report is added, in a single write. The client was
+    /// already counted when the job succeeded.
+    pub fn record_unopenable(&self) {
+        self.change(|a| {
+            a.totals.succeeded = a.totals.succeeded.saturating_sub(1);
+            a.totals.failed += 1;
+            a.totals.contributed += 1;
+        });
     }
 
     /// The current totals, or `None` while the statistics are unavailable.
@@ -599,6 +613,40 @@ mod tests {
         assert_eq!(counts(&s), (3, 2, 1, 0));
         drop(s);
         assert_eq!(counts(&open(dir.path())), (3, 2, 1, 0));
+    }
+
+    #[test]
+    fn unopenable_moves_one_success_to_failed_and_contributed() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let s = open(dir.path());
+            for _ in 0..3 {
+                s.record_outcome(Outcome::Succeeded, ip("203.0.113.7"));
+            }
+            s.record_outcome(Outcome::Failed, ip("203.0.113.7"));
+            assert_eq!(counts(&s), (1, 3, 1, 0));
+            s.record_unopenable();
+            assert_eq!(counts(&s), (1, 2, 2, 1));
+        }
+        assert_eq!(counts(&open(dir.path())), (1, 2, 2, 1));
+    }
+
+    #[test]
+    fn unopenable_never_takes_succeeded_below_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = open(dir.path());
+        s.record_unopenable();
+        assert_eq!(counts(&s), (0, 0, 1, 1));
+    }
+
+    #[test]
+    fn unopenable_is_ignored_while_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        seed(dir.path(), "{");
+        let s = open(dir.path());
+        s.record_unopenable();
+        assert_eq!(s.snapshot(), None);
+        assert_eq!(std::fs::read(stats_file(dir.path())).unwrap(), b"{");
     }
 
     #[test]

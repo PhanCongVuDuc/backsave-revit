@@ -16,10 +16,13 @@ use tokio_util::sync::CancellationToken;
 const MAX_JOBS_PER_HOUR: usize = 5;
 const MAX_WAITING_UPLOADS: usize = 2;
 const MAX_QUEUED: usize = 20;
-const DONE_RETENTION_MIN: i64 = 60;
+const DONE_RETENTION_MIN: i64 = 120;
+/// How long a converted file can be downloaded, in seconds (`DONE_RETENTION_MIN`).
+pub const OUTPUT_TTL_S: u64 = DONE_RETENTION_MIN as u64 * 60;
 const FAILED_RETENTION_MIN: i64 = 15;
 const EXPIRED_RECORD_HOURS: i64 = 24;
-/// An unfinished upload is dropped after this long without any accepted data...
+/// An unfinished upload (of a job, or of an open report) is dropped after this long without any
+/// accepted data...
 const UPLOAD_IDLE_MIN: i64 = 60;
 /// ...or this long after the job was created, whichever comes first.
 const UPLOAD_MAX_HOURS: i64 = 6;
@@ -118,6 +121,8 @@ pub struct Job {
     pub report_code: Option<String>,
     /// True while a report for this job is being written.
     pub reporting: bool,
+    /// The original being sent again for a "does not open" report, while it uploads.
+    pub open_report: Option<OpenReport>,
     /// Insertion order, used to break ties in FIFO ordering.
     seq: u64,
 }
@@ -131,12 +136,42 @@ pub struct NewJob {
     pub target: u16,
 }
 
+/// The upload of the original for a "does not open" report on a done job. The file goes to
+/// `JobStore::report_input_path`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenReport {
+    pub received: u64,
+    pub note: Option<String>,
+    /// Opening time, then the time of the last accepted chunk.
+    pub last_activity: DateTime<Utc>,
+    /// Rate-limit key of the client sending the original; its uploads in progress count this one.
+    pub ip: IpAddr,
+}
+
+/// What `JobStore::open_report_start` did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenReportStart {
+    Opened,
+    /// The upload was already open; it continues from where it was.
+    Resumed,
+}
+
+/// The two kinds of report: on a failed job, or on a done job whose file does not open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportKind {
+    Failed,
+    DoesNotOpen,
+}
+
 /// What `JobStore::claim_report` found.
 #[derive(Debug, Clone)]
 pub enum ReportClaim {
     Claimed(Box<Job>),
     NotFound,
+    /// A `Failed` report on a job that did not fail.
     NotFailed,
+    /// A `DoesNotOpen` report on a job that is not done.
+    NotDone,
     Expired,
     AlreadyReported,
 }
@@ -166,10 +201,12 @@ pub struct JobStore {
 }
 
 /// Disk space a job holds or has reserved: input plus output while it is unfinished, the
-/// output once done, the kept input after a failure.
+/// output once done (plus the original while it is sent again for a report), the kept input
+/// after a failure.
 fn disk_use(j: &Job) -> u64 {
     match j.state {
         JobState::WaitingUpload | JobState::Queued | JobState::Running => j.size.saturating_mul(2),
+        JobState::Done if j.open_report.is_some() => j.output_size.saturating_add(j.size),
         JobState::Done => j.output_size,
         JobState::Failed if j.report_code.is_none() => j.received,
         _ => 0,
@@ -178,6 +215,33 @@ fn disk_use(j: &Job) -> u64 {
 
 fn api(status: StatusCode, code: &'static str, msg: &str) -> ApiError {
     ApiError::new(status, code, msg)
+}
+
+/// True for an upload still in progress from `ip`: a job of `ip` waiting for its file, or an open
+/// report that `ip` is sending (whoever created the job).
+fn is_open_upload(j: &Job, ip: IpAddr) -> bool {
+    match (&j.state, &j.open_report) {
+        (JobState::WaitingUpload, _) => j.ip == ip,
+        (JobState::Done, Some(open)) => open.ip == ip,
+        _ => false,
+    }
+}
+
+fn uploads_in_progress() -> ApiError {
+    api(
+        StatusCode::TOO_MANY_REQUESTS,
+        "uploads_in_progress",
+        "Too many uploads in progress.",
+    )
+}
+
+fn server_full() -> ApiError {
+    api(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "server_full",
+        "The server is busy with other files. Try again later.",
+    )
+    .retry_after(SERVER_FULL_RETRY_S)
 }
 
 impl JobStore {
@@ -219,6 +283,12 @@ impl JobStore {
 
     pub fn log_path(&self, job: &Job) -> PathBuf {
         self.job_dir(job).join("log.jsonl")
+    }
+
+    /// Where the original sent again for a "does not open" report is written.
+    pub fn report_input_path(&self, job: &Job) -> PathBuf {
+        self.job_dir(job)
+            .join(format!("report-input.{}", job.kind.ext()))
     }
 
     pub fn create(&self, req: NewJob, ip: IpAddr, pairs: &[(u16, u16)]) -> Result<Job, ApiError> {
@@ -280,12 +350,8 @@ impl JobStore {
                 "You already have a conversion in progress.",
             ));
         }
-        if count(&g, &|j| j.state == JobState::WaitingUpload) >= MAX_WAITING_UPLOADS {
-            return Err(api(
-                StatusCode::TOO_MANY_REQUESTS,
-                "uploads_in_progress",
-                "Too many uploads in progress.",
-            ));
+        if g.jobs.values().filter(|j| is_open_upload(j, ip)).count() >= MAX_WAITING_UPLOADS {
+            return Err(uploads_in_progress());
         }
         if g.jobs
             .values()
@@ -302,12 +368,7 @@ impl JobStore {
         }
         let in_use: u64 = g.jobs.values().map(disk_use).sum();
         if in_use.saturating_add(req.size.saturating_mul(2)) > self.disk_budget {
-            return Err(api(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "server_full",
-                "The server is busy with other files. Try again later.",
-            )
-            .retry_after(SERVER_FULL_RETRY_S));
+            return Err(server_full());
         }
 
         let id = JobId::random();
@@ -333,6 +394,7 @@ impl JobStore {
             cancel: CancellationToken::new(),
             report_code: None,
             reporting: false,
+            open_report: None,
             seq,
         };
         if std::fs::create_dir_all(self.job_dir(&job)).is_err() {
@@ -520,17 +582,149 @@ impl JobStore {
         self.data_dir.join("jobs")
     }
 
-    /// Atomically claims the right to write a report for a failed job. Only one caller at a
-    /// time (and only once per job) gets `Claimed`; `release_report` gives the claim back.
-    pub fn claim_report(&self, id: &JobId) -> ReportClaim {
+    /// Opens (or resumes) the upload of the original for a "does not open" report on a done job.
+    /// Checked in this order: the job's state, an earlier report, the size (which must be the
+    /// job's), the uploads in progress from `ip` (the reporter, who may not be the job's creator),
+    /// then the disk budget (as `create` does). A report upload makes no job, so it does not count
+    /// toward the hourly limit. Resuming updates the note, does not count as activity for the idle
+    /// rule, and is never refused for the budget or the upload limit.
+    pub fn open_report_start(
+        &self,
+        id: &JobId,
+        size: u64,
+        note: Option<String>,
+        ip: IpAddr,
+    ) -> Result<OpenReportStart, ApiError> {
+        let ip = rate_key(ip);
+        let now = self.clock.now();
+        let mut g = self.lock();
+        let Some(j) = g.jobs.get(id) else {
+            return Err(api(StatusCode::NOT_FOUND, "not_found", "Job not found."));
+        };
+        match j.state {
+            JobState::Done => {}
+            JobState::Expired => {
+                return Err(api(StatusCode::GONE, "expired", "This job has expired."));
+            }
+            _ => {
+                return Err(api(
+                    StatusCode::CONFLICT,
+                    "not_done",
+                    "Only a finished conversion can be reported as not opening.",
+                ));
+            }
+        }
+        if j.reporting || j.report_code.is_some() {
+            return Err(api(
+                StatusCode::CONFLICT,
+                "already_reported",
+                "This conversion was already reported.",
+            ));
+        }
+        if size != j.size {
+            return Err(api(
+                StatusCode::CONFLICT,
+                "size_mismatch",
+                "This is not the original file of this conversion.",
+            ));
+        }
+        if j.open_report.is_none() {
+            if g.jobs.values().filter(|j| is_open_upload(j, ip)).count() >= MAX_WAITING_UPLOADS {
+                return Err(uploads_in_progress());
+            }
+            let in_use: u64 = g.jobs.values().map(disk_use).sum();
+            if in_use.saturating_add(size) > self.disk_budget {
+                return Err(server_full());
+            }
+        }
+        let j = g.jobs.get_mut(id).expect("job present");
+        match &mut j.open_report {
+            Some(open) => {
+                // Only received data counts as activity: asking again does not keep an idle
+                // upload (and its disk reservation) alive.
+                open.note = note;
+                Ok(OpenReportStart::Resumed)
+            }
+            None => {
+                j.open_report = Some(OpenReport {
+                    received: 0,
+                    note,
+                    last_activity: now,
+                    ip,
+                });
+                Ok(OpenReportStart::Opened)
+            }
+        }
+    }
+
+    /// Adds to the received byte counter of an open report, marks it as active and returns the
+    /// new total (0 when the job or its open report is gone).
+    pub fn open_report_add_received(&self, id: &JobId, n: u64) -> u64 {
+        let now = self.clock.now();
+        match self
+            .lock()
+            .jobs
+            .get_mut(id)
+            .and_then(|j| j.open_report.as_mut())
+        {
+            Some(open) => {
+                open.received += n;
+                open.last_activity = now;
+                open.received
+            }
+            None => 0,
+        }
+    }
+
+    /// Closes the open report of a job and deletes the partial original. The job itself stays.
+    pub fn open_report_close(&self, id: &JobId) {
+        self.close_open_report_if(id, |_| true);
+    }
+
+    /// Closes an open report that has received nothing for more than an hour, unless a report is
+    /// being written from it at this moment. Decided under the lock.
+    pub fn close_idle_open_report(&self, id: &JobId, now: DateTime<Utc>) -> bool {
+        self.close_open_report_if(id, |j| {
+            !j.reporting
+                && j.open_report
+                    .as_ref()
+                    .is_some_and(|o| now - o.last_activity > Duration::minutes(UPLOAD_IDLE_MIN))
+        })
+    }
+
+    fn close_open_report_if(&self, id: &JobId, cond: impl FnOnce(&Job) -> bool) -> bool {
+        let job = {
+            let mut g = self.lock();
+            match g.jobs.get_mut(id) {
+                Some(j) if j.open_report.is_some() && cond(j) => {
+                    j.open_report = None;
+                    j.clone()
+                }
+                _ => return false,
+            }
+        };
+        let path = self.report_input_path(&job);
+        if let Err(e) = std::fs::remove_file(&path)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(error = ?e.kind(), "could not remove a partial report upload");
+        }
+        true
+    }
+
+    /// Atomically claims the right to write a report of `kind`: on a failed job for `Failed`, on
+    /// a done job for `DoesNotOpen`. Only one caller at a time (and only once per job, whatever
+    /// the kind) gets `Claimed`; `release_report` gives the claim back.
+    pub fn claim_report(&self, id: &JobId, kind: ReportKind) -> ReportClaim {
         let mut g = self.lock();
         let Some(j) = g.jobs.get_mut(id) else {
             return ReportClaim::NotFound;
         };
-        match j.state {
-            JobState::Failed => {}
-            JobState::Expired => return ReportClaim::Expired,
-            _ => return ReportClaim::NotFailed,
+        match (j.state, kind) {
+            (JobState::Failed, ReportKind::Failed) | (JobState::Done, ReportKind::DoesNotOpen) => {}
+            (JobState::Expired, _) => return ReportClaim::Expired,
+            (_, ReportKind::Failed) => return ReportClaim::NotFailed,
+            (_, ReportKind::DoesNotOpen) => return ReportClaim::NotDone,
         }
         if j.reporting || j.report_code.is_some() {
             return ReportClaim::AlreadyReported;
@@ -667,6 +861,7 @@ impl JobStore {
                     j.expires_at = Some(now + Duration::hours(EXPIRED_RECORD_HOURS));
                     j.dropped = Vec::new();
                     j.name = String::new();
+                    j.open_report = None;
                     j.clone()
                 }
                 _ => return false,
@@ -680,12 +875,14 @@ impl JobStore {
         true
     }
 
-    /// Records the report code of a job; false when the job is gone or already has one.
+    /// Records the report code of a job and closes its open report, if any; false when the job
+    /// is gone or already has one.
     pub fn set_report_code(&self, id: &JobId, code: String) -> bool {
         match self.lock().jobs.get_mut(id) {
             Some(j) if j.report_code.is_none() => {
                 j.report_code = Some(code);
                 j.reporting = false;
+                j.open_report = None;
                 true
             }
             _ => false,
@@ -988,7 +1185,7 @@ mod tests {
         assert_eq!(j.state, JobState::Done);
         assert_eq!(j.dropped, vec![d]);
         assert_eq!(j.finished_at, Some(c.now()));
-        assert_eq!(j.expires_at, Some(c.now() + chrono::Duration::hours(1)));
+        assert_eq!(j.expires_at, Some(c.now() + chrono::Duration::hours(2)));
 
         let b = s.create(req(), ip(1), &pairs()).unwrap();
         s.mark_uploaded(&b.id);
@@ -1289,28 +1486,40 @@ mod tests {
     fn claim_report_is_exclusive() {
         let (s, _c, _d) = setup();
         let a = s.create(req(), ip(1), &pairs()).unwrap();
-        assert!(matches!(s.claim_report(&a.id), ReportClaim::NotFailed));
         assert!(matches!(
-            s.claim_report(&JobId::random()),
+            s.claim_report(&a.id, ReportKind::Failed),
+            ReportClaim::NotFailed
+        ));
+        assert!(matches!(
+            s.claim_report(&JobId::random(), ReportKind::Failed),
             ReportClaim::NotFound
         ));
         s.mark_uploaded(&a.id);
         s.take_next().unwrap();
         s.finish(&a.id, Err((ErrorKind::Failed, "x".into())));
-        assert!(matches!(s.claim_report(&a.id), ReportClaim::Claimed(_)));
         assert!(matches!(
-            s.claim_report(&a.id),
+            s.claim_report(&a.id, ReportKind::Failed),
+            ReportClaim::Claimed(_)
+        ));
+        assert!(matches!(
+            s.claim_report(&a.id, ReportKind::Failed),
             ReportClaim::AlreadyReported
         ));
         s.release_report(&a.id);
-        assert!(matches!(s.claim_report(&a.id), ReportClaim::Claimed(_)));
+        assert!(matches!(
+            s.claim_report(&a.id, ReportKind::Failed),
+            ReportClaim::Claimed(_)
+        ));
         assert!(s.set_report_code(&a.id, "R-AAAAAA".into()));
         assert!(matches!(
-            s.claim_report(&a.id),
+            s.claim_report(&a.id, ReportKind::Failed),
             ReportClaim::AlreadyReported
         ));
         s.expire(&a.id, _c.now());
-        assert!(matches!(s.claim_report(&a.id), ReportClaim::Expired));
+        assert!(matches!(
+            s.claim_report(&a.id, ReportKind::Failed),
+            ReportClaim::Expired
+        ));
     }
 
     #[test]
@@ -1323,5 +1532,311 @@ mod tests {
         let done = done_job(&s);
         s.expire(&done.id, _c.now());
         assert!(s.is_orphan_dir(&done.id.to_string()));
+    }
+
+    /// A done job for `ip` with a 30-byte converted file.
+    fn done_for(s: &JobStore, req: NewJob, ip: IpAddr) -> Job {
+        let a = s.create(req, ip, &pairs()).unwrap();
+        s.mark_uploaded(&a.id);
+        s.take_next().unwrap();
+        s.finish_done(&a.id, Vec::new(), 30);
+        s.get(&a.id).unwrap()
+    }
+
+    fn start_err(r: Result<OpenReportStart, ApiError>) -> (StatusCode, &'static str, Option<u64>) {
+        let e = r.expect_err("expected an error");
+        (e.status, e.code, e.retry_after_s)
+    }
+
+    #[test]
+    fn done_job_is_kept_for_2_hours() {
+        let (s, c, _d) = setup();
+        let a = done_job(&s);
+        assert_eq!(a.expires_at, Some(c.now() + chrono::Duration::minutes(120)));
+    }
+
+    #[test]
+    fn open_report_start_maps_job_states() {
+        let (s, c, _d) = setup();
+        let size = req().size;
+        let start = |id: &JobId| s.open_report_start(id, size, None, ip(9));
+        assert_eq!(
+            start_err(start(&JobId::random())),
+            (StatusCode::NOT_FOUND, "not_found", None)
+        );
+        let waiting = s.create(req(), ip(1), &pairs()).unwrap();
+        assert_eq!(
+            start_err(start(&waiting.id)),
+            (StatusCode::CONFLICT, "not_done", None)
+        );
+        let queued = s.create(req(), ip(2), &pairs()).unwrap();
+        s.mark_uploaded(&queued.id);
+        assert_eq!(start_err(start(&queued.id)).1, "not_done");
+        s.take_next().unwrap();
+        assert_eq!(start_err(start(&queued.id)).1, "not_done", "running");
+        s.finish(&queued.id, Err((ErrorKind::Failed, "x".into())));
+        assert_eq!(start_err(start(&queued.id)).1, "not_done", "failed");
+        s.cancel(&waiting.id);
+        assert_eq!(start_err(start(&waiting.id)).1, "not_done", "cancelled");
+
+        let done = done_for(&s, req(), ip(3));
+        assert_eq!(start(&done.id).unwrap(), OpenReportStart::Opened);
+        let open = s.get(&done.id).unwrap().open_report.unwrap();
+        assert_eq!((open.received, open.note), (0, None));
+        s.expire(&done.id, c.now());
+        assert_eq!(
+            start_err(start(&done.id)),
+            (StatusCode::GONE, "expired", None)
+        );
+    }
+
+    #[test]
+    fn open_report_start_checks_size_and_earlier_reports() {
+        let (s, _c, _d) = setup();
+        let a = done_for(&s, req(), ip(1));
+        assert_eq!(
+            start_err(s.open_report_start(&a.id, 999, None, ip(1))),
+            (StatusCode::CONFLICT, "size_mismatch", None)
+        );
+        assert!(s.get(&a.id).unwrap().open_report.is_none());
+
+        let b = done_for(&s, req(), ip(2));
+        assert!(matches!(
+            s.claim_report(&b.id, ReportKind::DoesNotOpen),
+            ReportClaim::Claimed(_)
+        ));
+        assert_eq!(
+            start_err(s.open_report_start(&b.id, 1000, None, ip(2))),
+            (StatusCode::CONFLICT, "already_reported", None)
+        );
+        assert!(s.set_report_code(&b.id, "R-AAAAAA".into()));
+        assert_eq!(
+            start_err(s.open_report_start(&b.id, 1000, None, ip(2))).1,
+            "already_reported"
+        );
+    }
+
+    #[test]
+    fn open_report_start_again_resumes_and_updates_the_note() {
+        let (s, c, _d) = setup();
+        let a = done_for(&s, req(), ip(1));
+        let first = s.open_report_start(&a.id, 1000, Some("first".into()), ip(1));
+        assert_eq!(first.unwrap(), OpenReportStart::Opened);
+        c.advance(Duration::from_secs(60));
+        assert_eq!(s.open_report_add_received(&a.id, 400), 400);
+        let active = c.now();
+        c.advance(Duration::from_secs(60));
+        let again = s.open_report_start(&a.id, 1000, Some("second".into()), ip(1));
+        assert_eq!(again.unwrap(), OpenReportStart::Resumed);
+        let open = s.get(&a.id).unwrap().open_report.unwrap();
+        assert_eq!(open.received, 400, "the offset is kept");
+        assert_eq!(open.note.as_deref(), Some("second"));
+        assert_eq!(open.last_activity, active, "asking again is not activity");
+    }
+
+    #[test]
+    fn resuming_without_data_does_not_keep_an_idle_report_open() {
+        let (s, c, _d) = setup();
+        let a = done_for(&s, req(), ip(1));
+        s.open_report_start(&a.id, 1000, None, ip(1)).unwrap();
+        c.advance(Duration::from_secs(59 * 60));
+        s.open_report_start(&a.id, 1000, None, ip(1)).unwrap();
+        c.advance(Duration::from_secs(2 * 60));
+        assert!(s.close_idle_open_report(&a.id, c.now()));
+    }
+
+    #[test]
+    fn open_reports_count_as_uploads_in_progress() {
+        let (s, _c, _d) = setup();
+        let a = done_for(&s, req(), ip(1));
+        let b = done_for(&s, req(), ip(1));
+        let c = done_for(&s, req(), ip(3));
+        let d = done_for(&s, req(), ip(3));
+        s.create(req(), ip(1), &pairs()).unwrap();
+        // One waiting upload plus one open report reaches the limit of two.
+        assert!(s.open_report_start(&a.id, 1000, None, ip(1)).is_ok());
+        assert_eq!(
+            start_err(s.open_report_start(&b.id, 1000, None, ip(1))),
+            (StatusCode::TOO_MANY_REQUESTS, "uploads_in_progress", None)
+        );
+        assert_eq!(
+            err_of(s.create(req(), ip(1), &pairs())),
+            (StatusCode::TOO_MANY_REQUESTS, "uploads_in_progress", None)
+        );
+        // Resuming the open report is never refused.
+        assert_eq!(
+            s.open_report_start(&a.id, 1000, None, ip(1)).unwrap(),
+            OpenReportStart::Resumed
+        );
+        // Another client is not limited by ip(1)'s uploads...
+        assert!(s.open_report_start(&b.id, 1000, None, ip(2)).is_ok());
+        // ...but by its own, even on jobs it did not create.
+        assert!(s.open_report_start(&c.id, 1000, None, ip(2)).is_ok());
+        assert_eq!(
+            start_err(s.open_report_start(&d.id, 1000, None, ip(2))).1,
+            "uploads_in_progress"
+        );
+    }
+
+    #[test]
+    fn open_report_reserves_disk_for_the_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(ManualClock::new(
+            chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap(),
+        ));
+        let s = JobStore::new(dir.path().to_path_buf(), clock).with_disk_budget(450);
+        // a done: 30 in use. b needs 2 x 200 while it runs: 430 fits.
+        let a = done_for(&s, sized(200), ip(1));
+        let b = done_for(&s, sized(200), ip(2));
+        // 60 in use; the open report reserves 200 more.
+        assert!(s.open_report_start(&a.id, 200, None, ip(1)).is_ok());
+        assert_eq!(
+            err_of(s.create(sized(100), ip(3), &pairs())),
+            (StatusCode::SERVICE_UNAVAILABLE, "server_full", Some(600))
+        );
+        assert_eq!(
+            start_err(s.open_report_start(&b.id, 200, None, ip(2))),
+            (StatusCode::SERVICE_UNAVAILABLE, "server_full", Some(600))
+        );
+        // Closing the open report gives the space back.
+        s.open_report_close(&a.id);
+        assert!(s.open_report_start(&b.id, 200, None, ip(2)).is_ok());
+    }
+
+    #[test]
+    fn open_report_upload_limit_is_checked_before_the_disk_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(ManualClock::new(
+            chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap(),
+        ));
+        let s = JobStore::new(dir.path().to_path_buf(), clock).with_disk_budget(400);
+        let a = done_for(&s, sized(200), ip(1));
+        s.create(sized(100), ip(1), &pairs()).unwrap();
+        s.create(sized(10), ip(1), &pairs()).unwrap();
+        // Two uploads in progress, and 30 + 200 + 20 of 400 bytes in use: neither the upload limit
+        // nor the budget allows another 200 bytes.
+        assert_eq!(
+            start_err(s.open_report_start(&a.id, 200, None, ip(1))).1,
+            "uploads_in_progress"
+        );
+    }
+
+    #[test]
+    fn open_report_does_not_count_toward_the_hourly_limit() {
+        let (s, _c, _d) = setup();
+        let first = done_for(&s, req(), ip(1));
+        for _ in 0..3 {
+            done_for(&s, req(), ip(1));
+        }
+        assert!(s.open_report_start(&first.id, 1000, None, ip(1)).is_ok());
+        // Four jobs this hour: the fifth is still allowed, the sixth is not.
+        s.create(req(), ip(1), &pairs()).unwrap();
+        assert_eq!(err_of(s.create(req(), ip(1), &pairs())).1, "hourly_limit");
+    }
+
+    #[test]
+    fn claim_report_follows_the_report_kind() {
+        let (s, _c, _d) = setup();
+        let done = done_for(&s, req(), ip(1));
+        assert!(matches!(
+            s.claim_report(&done.id, ReportKind::Failed),
+            ReportClaim::NotFailed
+        ));
+        let failed = s.create(req(), ip(2), &pairs()).unwrap();
+        s.mark_uploaded(&failed.id);
+        s.take_next().unwrap();
+        s.finish(&failed.id, Err((ErrorKind::Failed, "x".into())));
+        assert!(matches!(
+            s.claim_report(&failed.id, ReportKind::DoesNotOpen),
+            ReportClaim::NotDone
+        ));
+        assert!(matches!(
+            s.claim_report(&done.id, ReportKind::DoesNotOpen),
+            ReportClaim::Claimed(_)
+        ));
+        assert!(matches!(
+            s.claim_report(&failed.id, ReportKind::Failed),
+            ReportClaim::Claimed(_)
+        ));
+    }
+
+    #[test]
+    fn concurrent_open_report_claims_give_one_winner() {
+        let (s, _c, _d) = setup();
+        let s = Arc::new(s);
+        let done = done_for(&s, req(), ip(1));
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let s = s.clone();
+                std::thread::spawn(move || {
+                    matches!(
+                        s.claim_report(&done.id, ReportKind::DoesNotOpen),
+                        ReportClaim::Claimed(_)
+                    )
+                })
+            })
+            .collect();
+        let won = threads
+            .into_iter()
+            .map(|t| t.join().unwrap())
+            .filter(|w| *w)
+            .count();
+        assert_eq!(won, 1);
+    }
+
+    #[test]
+    fn report_input_path_is_in_the_job_dir() {
+        let (s, _c, _d) = setup();
+        let a = done_job(&s);
+        assert!(
+            s.report_input_path(&a)
+                .ends_with(format!("{}/report-input.rvt", a.id))
+        );
+    }
+
+    #[test]
+    fn idle_open_report_is_closed_and_its_file_removed() {
+        let (s, c, _d) = setup();
+        let a = done_for(&s, req(), ip(1));
+        s.open_report_start(&a.id, 1000, None, ip(1)).unwrap();
+        c.advance(Duration::from_secs(600));
+        s.open_report_add_received(&a.id, 10);
+        let path = s.report_input_path(&a);
+        std::fs::write(&path, b"0123456789").unwrap();
+        c.advance(Duration::from_secs(3600));
+        assert!(
+            !s.close_idle_open_report(&a.id, c.now()),
+            "exactly 1 h idle"
+        );
+        c.advance(Duration::from_secs(1));
+        assert!(s.close_idle_open_report(&a.id, c.now()));
+        let after = s.get(&a.id).unwrap();
+        assert!(after.open_report.is_none());
+        assert_eq!(after.state, JobState::Done);
+        assert!(!path.exists());
+        assert!(s.job_dir(&a).is_dir(), "the job keeps its converted file");
+    }
+
+    #[test]
+    fn open_report_being_finished_is_not_closed_as_idle() {
+        let (s, c, _d) = setup();
+        let a = done_for(&s, req(), ip(1));
+        s.open_report_start(&a.id, 1000, None, ip(1)).unwrap();
+        assert!(matches!(
+            s.claim_report(&a.id, ReportKind::DoesNotOpen),
+            ReportClaim::Claimed(_)
+        ));
+        c.advance(Duration::from_secs(2 * 3600));
+        assert!(!s.close_idle_open_report(&a.id, c.now()));
+        assert!(s.get(&a.id).unwrap().open_report.is_some());
+    }
+
+    #[test]
+    fn report_code_closes_the_open_report() {
+        let (s, _c, _d) = setup();
+        let a = done_for(&s, req(), ip(1));
+        s.open_report_start(&a.id, 1000, None, ip(1)).unwrap();
+        assert!(s.set_report_code(&a.id, "R-AAAAAA".into()));
+        assert!(s.get(&a.id).unwrap().open_report.is_none());
     }
 }

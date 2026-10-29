@@ -117,6 +117,17 @@ async fn body_json(resp: axum::response::Response) -> Value {
     serde_json::from_slice(&b).unwrap()
 }
 
+fn post_open_report(id: &str, size: u64) -> Request<Body> {
+    Request::builder()
+        .method(Method::POST)
+        .uri(format!("/api/jobs/{id}/open-report"))
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({ "consent": true, "size": size }).to_string(),
+        ))
+        .unwrap()
+}
+
 fn get(uri: &str) -> Request<Body> {
     Request::builder().uri(uri).body(Body::empty()).unwrap()
 }
@@ -145,11 +156,11 @@ fn waiting_upload_removed_after_1h() {
 }
 
 #[tokio::test]
-async fn done_output_removed_after_1h_then_410() {
+async fn done_output_removed_after_2h_then_410() {
     let f = setup();
     let job = done_job(&f, 1);
     let id = job.id.to_string();
-    advance(&f, 3600);
+    advance(&f, 7200);
     run_sweep(&f);
     assert_eq!(f.state.store.get(&job.id).unwrap().state, JobState::Done);
     advance(&f, 1);
@@ -385,7 +396,7 @@ fn orphan_dir_removed_on_next_sweep() {
 fn expired_job_dir_retried() {
     let f = setup();
     let job = done_job(&f, 1);
-    advance(&f, 3601);
+    advance(&f, 7201);
     run_sweep(&f);
     assert_eq!(f.state.store.get(&job.id).unwrap().state, JobState::Expired);
     // Pretend the first delete failed: the directory is back.
@@ -467,9 +478,56 @@ fn sweep_prunes_old_client_history() {
 async fn expired_job_forgets_its_name() {
     let f = setup();
     let job = done_job(&f, 1);
-    advance(&f, 3601);
+    advance(&f, 7201);
     run_sweep(&f);
     let after = f.state.store.get(&job.id).unwrap();
     assert_eq!(after.state, JobState::Expired);
     assert_eq!(after.name, "");
+}
+
+#[tokio::test]
+async fn done_job_downloads_and_reports_until_2_hours() {
+    let f = setup();
+    let job = done_job(&f, 1);
+    let id = job.id.to_string();
+    // 1 h 59 min after the conversion.
+    advance(&f, 119 * 60);
+    run_sweep(&f);
+    assert_eq!(
+        send(&f, get(&format!("/api/jobs/{id}/file")))
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    let resp = send(&f, post_open_report(&id, job.size)).await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    // 2 h 1 min after the conversion.
+    advance(&f, 2 * 60);
+    run_sweep(&f);
+    let resp = send(&f, post_open_report(&id, job.size)).await;
+    assert_eq!(resp.status(), StatusCode::GONE);
+    assert_eq!(body_json(resp).await["error"]["code"], "expired");
+    assert!(report_dirs(&f).is_empty());
+}
+
+#[tokio::test]
+async fn idle_open_report_closed_by_sweep() {
+    let f = setup();
+    let job = done_job(&f, 1);
+    let id = job.id.to_string();
+    let resp = send(&f, post_open_report(&id, job.size)).await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let partial = f.state.store.report_input_path(&job);
+    std::fs::write(&partial, b"part").unwrap();
+    f.state.store.open_report_add_received(&job.id, 4);
+    advance(&f, 3600);
+    run_sweep(&f);
+    assert!(f.state.store.get(&job.id).unwrap().open_report.is_some());
+    advance(&f, 1);
+    run_sweep(&f);
+    let after = f.state.store.get(&job.id).unwrap();
+    assert_eq!(after.state, JobState::Done);
+    assert!(after.open_report.is_none());
+    assert!(!partial.exists());
+    assert!(f.state.store.output_path(&job).is_file());
 }
