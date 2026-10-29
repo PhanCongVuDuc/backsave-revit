@@ -56,9 +56,9 @@ async fn log_request(req: Request, next: Next) -> Response {
     resp
 }
 
-const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 
-/// Browser hardening for every response: same-origin content only, no framing, no referrer.
+/// Browser hardening for every response: same-origin content (plus the Cloudflare Web Analytics beacon), no framing, no referrer.
 async fn security_headers(req: Request, next: Next) -> Response {
     let mut resp = next.run(req).await;
     let h = resp.headers_mut();

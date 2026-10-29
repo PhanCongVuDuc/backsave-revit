@@ -40,7 +40,7 @@
     },
     "cookies": {
       "title": "Cookie và theo dõi",
-      "body": "Revit Downgrade không đặt cookie theo dõi, không có phân tích hay quảng cáo. Trình duyệt chỉ nhớ ngôn ngữ bạn chọn và danh sách các lần tải lên chưa xong (tên, dung lượng, ngày của file kèm mã phiên chuyển đổi), để khi chọn lại đúng file đó thì tải tiếp được. Danh sách được xoá khi tải lên xong và sau 6 giờ."
+      "body": "Revit Downgrade không đặt cookie theo dõi và không có quảng cáo. Lượt xem trang được đếm bằng Cloudflare Web Analytics, không dùng cookie và không theo dõi bạn qua các trang web khác. Trình duyệt chỉ nhớ ngôn ngữ bạn chọn và danh sách các lần tải lên chưa xong (tên, dung lượng, ngày của file kèm mã phiên chuyển đổi), để khi chọn lại đúng file đó thì tải tiếp được. Danh sách được xoá khi tải lên xong và sau 6 giờ."
     },
     "logs": {
       "title": "Nhật ký máy chủ",

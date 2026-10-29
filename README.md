@@ -14,7 +14,8 @@ This repository is public so you can check for yourself what happens to your fil
 
 - Nothing is uploaded until you press **Downgrade**. Before that, your browser only reads the Revit version.
 - Your file is not shared with anyone.
-- No tracking cookies, no analytics.
+- No tracking cookies and no advertising. Page views are counted with Cloudflare Web Analytics, which uses no cookies
+  and does not follow you across sites.
 - File names are never written to the server logs.
 
 How long files stay on the server:

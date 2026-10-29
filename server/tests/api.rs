@@ -594,7 +594,7 @@ async fn responses_carry_security_headers() {
         let h = resp.headers();
         assert_eq!(
             h["content-security-policy"],
-            "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+            "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
             "{uri}"
         );
         assert_eq!(h["x-frame-options"], "DENY");
